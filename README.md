@@ -3,3 +3,6 @@ Experimental Android 14+ screen reader for visible portrait Google Maps in Irela
 
 ## v0.3 demo
 Open Demo mode to test simulated speed limits, GPS-free speed and spoken warnings indoors. The demo stops live GPS monitoring and does not test Maps screen recognition. Voice requires an Android TTS engine. New CI debug signing keys can require uninstalling the earlier APK before installation; re-enable permissions afterward.
+
+## v0.4 video OCR test
+Choose a portrait navigation video via the new Video OCR test button. It samples frames one second apart, displays recognition results from the same VisualReader used in Maps, and announces confirmed limits. Playback is frame-by-frame, not normal-speed video; GPS and overspeed alerts are not tested here. No video frames are uploaded or saved by this feature. Live Maps package restriction remains unchanged. Requires on-device validation.
