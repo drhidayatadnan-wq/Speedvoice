@@ -6,6 +6,7 @@ import android.media.AudioTrack;
 import android.media.AudioFormat;
 import android.os.Bundle;
 import java.util.function.Supplier;
+import java.util.function.IntSupplier;
 import android.media.AudioAttributes;
 import android.media.AudioFocusRequest;
 import android.media.AudioManager;
@@ -34,8 +35,8 @@ final class SpeechGate {
  private Item pending,active;
  private String activeId;
  private static final class Item {
-  final Supplier<String> text; final int priority; final BooleanSupplier valid; final long created;
-  Item(Supplier<String> t,int p,BooleanSupplier v){text=t;priority=p;valid=v;created=SystemClock.elapsedRealtime();}
+  final Supplier<String> text; final IntSupplier excess; final int priority; final BooleanSupplier valid; final long created;
+  Item(Supplier<String> t,int p,BooleanSupplier v,IntSupplier e){text=t;excess=e;priority=p;valid=v;created=SystemClock.elapsedRealtime();}
   boolean usable(long now){try{return now-created<=TTL_MS&&valid.getAsBoolean();}catch(RuntimeException e){return false;}}
  }
  private final Runnable poll=new Runnable(){public void run(){if(closed)return;try{tick();}catch(RuntimeException e){cancel();}finally{if(!closed)h.postDelayed(this,POLL_MS);}}};
@@ -58,8 +59,11 @@ final class SpeechGate {
   offerDynamic(()->text,priority,valid);
  }
  void offerDynamic(Supplier<String> text,int priority,BooleanSupplier valid){
+  offerDynamic(text,priority,valid,()->0);
+ }
+ void offerDynamic(Supplier<String> text,int priority,BooleanSupplier valid,IntSupplier excess){
   if(closed)return;
-  Item item=new Item(text,priority,valid);
+  Item item=new Item(text,priority,valid,excess);
   if(pending==null||!pending.usable(SystemClock.elapsedRealtime())||priority>=pending.priority)pending=item;
  }
  private boolean otherSpeech(){
@@ -92,7 +96,8 @@ final class SpeechGate {
   active=pending;pending=null;activeId="speedvoice-gate-"+(++seq);started=now;
   int mode=prefs.getInt("alert_mode",2);
   if(active.priority==2&&mode!=0){
-   if(startTone(mode==1?1:2)){
+   int excess=active.excess.getAsInt(); int count=mode==4?(excess>=15?3:excess>=5?2:1):(mode==1?1:2);
+   if(startTone(count)){
     final String id=activeId;
     afterTone=()->{
      afterTone=null;stopTone();
@@ -101,7 +106,7 @@ final class SpeechGate {
      if(otherSpeech()){interrupt(true);return;}
      if(mode==3)finished(id);else speakActive();
     };
-    h.postDelayed(afterTone,mode==1?300:540);
+    h.postDelayed(afterTone,300+240L*(count-1));
     return;
    }
    if(mode==3){finished(activeId);return;}

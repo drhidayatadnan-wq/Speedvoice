@@ -3,6 +3,7 @@ import android.os.SystemClock;
 final class State {
  static volatile boolean running=false;
  static volatile boolean muted=false;
+ static volatile String readerDiagnostic="Inactive";
  static volatile String status="Idle";
  static volatile int limit=-1;
  static volatile float speed=Float.NaN;

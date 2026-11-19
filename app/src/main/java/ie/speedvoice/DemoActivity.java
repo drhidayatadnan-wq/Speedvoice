@@ -19,7 +19,8 @@ public class DemoActivity extends Activity {
  private SpeechGate gate;
  private boolean ready=false, active=false;
  private int limit=50,speed=40,tolerance=0;
- private long overSince=-1,lastWarn=-1;
+ private long overSince=-1,lastWarn=-1,belowSince=-1;
+ private boolean warned=false;
  private TextView sign, speedText, message, voiceStatus, lastVoice;
  private final Runnable tick=new Runnable(){public void run(){if(active){evaluate();h.postDelayed(this,200);}}};
  private int dp(int n){return Math.round(n*getResources().getDisplayMetrics().density);}
@@ -52,9 +53,9 @@ public class DemoActivity extends Activity {
  render();
  voice=new TextToSpeech(this,result->{if(isFinishing()||isDestroyed()||voice==null)return;if(result==TextToSpeech.SUCCESS){ready=voice.setLanguage(Locale.UK)>=TextToSpeech.LANG_AVAILABLE;if(ready)gate=new SpeechGate(this,voice,h);}voiceStatus.setText(ready?"Voice ready • Alerts after 3 seconds, repeat at the selected interval.":"Voice unavailable — check Android text-to-speech settings.");if(ready&&active)speak("Speed limit "+limit+" kilometres per hour.");});
  }
- private void resetWarning(){overSince=lastWarn=-1;}
+ private void resetWarning(){overSince=lastWarn=belowSince=-1;warned=false;}
  private void render(){if(sign==null||speedText==null||message==null)return;boolean over=speed>limit+tolerance;sign.setText(""+limit);speedText.setText(speed+" km/h");speedText.setTextColor(over?Color.rgb(192,32,32):Color.rgb(30,125,65));message.setText(over?(lastWarn<0?"Simulated overspeed — warning after 3 seconds":"Simulated overspeed — slow down"):"Within selected warning threshold");}
- private void evaluate(){if(!active){render();return;}long now=SystemClock.elapsedRealtime();if(speed>limit+tolerance){if(overSince<0)overSince=now;if(now-overSince>=3000&&(lastWarn<0||now-lastWarn>=1000L*getSharedPreferences("prefs",MODE_PRIVATE).getInt("alert_interval",10))){lastWarn=now;speak("Warning. Speed limit "+limit+". Please slow down.");}}else resetWarning();render();}
+ private void evaluate(){if(!active){render();return;}long now=SystemClock.elapsedRealtime();if(speed>limit+tolerance){belowSince=-1;if(overSince<0)overSince=now;if(now-overSince>=3000&&(lastWarn<0||now-lastWarn>=1000L*getSharedPreferences("prefs",MODE_PRIVATE).getInt("alert_interval",10))){lastWarn=now;warned=true;speak("Warning. Speed limit "+limit+". Please slow down.");}}else{overSince=lastWarn=-1;if(warned&&speed<=limit){if(belowSince<0)belowSince=now;if(now-belowSince>=2000){warned=false;belowSince=-1;if(getSharedPreferences("prefs",MODE_PRIVATE).getBoolean("recovery_voice",true))speak("Back within the detected speed limit.");}}else belowSince=-1;}render();}
  private void speak(String s){
  if(!active)return;
  final int expected=limit;
@@ -64,7 +65,7 @@ public class DemoActivity extends Activity {
   String msg=warning?"Warning. Your speed is "+speed+" kilometres per hour. Speed limit "+expected+". Please slow down.":s;
   if(lastVoice!=null)lastVoice.setText("Last announcement: "+msg);
   return msg;
- },warning?2:1,()->active&&limit==expected&&(!warning||speed>limit+tolerance));
+ },warning?2:1,()->active&&limit==expected&&(!warning||speed>limit+tolerance)&&(!s.startsWith("Back within")||speed<=limit),()->Math.max(0,speed-expected));
  }
  @Override protected void onResume(){super.onResume();active=true;resetWarning();h.removeCallbacks(tick);h.post(tick);if(ready)speak("Speed limit "+limit+" kilometres per hour.");}
  @Override protected void onPause(){active=false;h.removeCallbacks(tick);if(gate!=null)gate.cancel();else if(voice!=null)voice.stop();super.onPause();}
