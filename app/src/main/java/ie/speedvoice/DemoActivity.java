@@ -16,6 +16,7 @@ import java.util.Locale;
 public class DemoActivity extends Activity {
  private final Handler h=new Handler(Looper.getMainLooper());
  private TextToSpeech voice;
+ private SpeechGate gate;
  private boolean ready=false, active=false;
  private int limit=50,speed=40,tolerance=0;
  private long overSince=-1,lastWarn=-1;
@@ -49,13 +50,23 @@ public class DemoActivity extends Activity {
  button(l,"Repeat speed limit announcement",v->speak("Speed limit "+limit+" kilometres per hour."));
  button(l,"Exit demo",v->finish());
  render();
- voice=new TextToSpeech(this,result->{if(isFinishing()||isDestroyed()||voice==null)return;if(result==TextToSpeech.SUCCESS){ready=voice.setLanguage(Locale.UK)>=TextToSpeech.LANG_AVAILABLE;voice.setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build());}voiceStatus.setText(ready?"Voice ready • Alerts after 3 seconds, repeat every 10 seconds.":"Voice unavailable — check Android text-to-speech settings.");if(ready&&active)speak("Speed limit "+limit+" kilometres per hour.");});
+ voice=new TextToSpeech(this,result->{if(isFinishing()||isDestroyed()||voice==null)return;if(result==TextToSpeech.SUCCESS){ready=voice.setLanguage(Locale.UK)>=TextToSpeech.LANG_AVAILABLE;if(ready)gate=new SpeechGate(this,voice,h);}voiceStatus.setText(ready?"Voice ready • Alerts after 3 seconds, repeat at the selected interval.":"Voice unavailable — check Android text-to-speech settings.");if(ready&&active)speak("Speed limit "+limit+" kilometres per hour.");});
  }
  private void resetWarning(){overSince=lastWarn=-1;}
  private void render(){if(sign==null||speedText==null||message==null)return;boolean over=speed>limit+tolerance;sign.setText(""+limit);speedText.setText(speed+" km/h");speedText.setTextColor(over?Color.rgb(192,32,32):Color.rgb(30,125,65));message.setText(over?(lastWarn<0?"Simulated overspeed — warning after 3 seconds":"Simulated overspeed — slow down"):"Within selected warning threshold");}
- private void evaluate(){if(!active){render();return;}long now=SystemClock.elapsedRealtime();if(speed>limit+tolerance){if(overSince<0)overSince=now;if(now-overSince>=3000&&(lastWarn<0||now-lastWarn>=10000)){lastWarn=now;speak("Warning. Speed limit "+limit+". Please slow down.");}}else resetWarning();render();}
- private void speak(String s){if(!active)return;if(lastVoice!=null)lastVoice.setText("Last announcement: "+s);if(ready&&voice!=null)voice.speak(s,TextToSpeech.QUEUE_FLUSH,null,"demo-"+SystemClock.elapsedRealtime());}
+ private void evaluate(){if(!active){render();return;}long now=SystemClock.elapsedRealtime();if(speed>limit+tolerance){if(overSince<0)overSince=now;if(now-overSince>=3000&&(lastWarn<0||now-lastWarn>=1000L*getSharedPreferences("prefs",MODE_PRIVATE).getInt("alert_interval",10))){lastWarn=now;speak("Warning. Speed limit "+limit+". Please slow down.");}}else resetWarning();render();}
+ private void speak(String s){
+ if(!active)return;
+ final int expected=limit;
+ final boolean warning=s.startsWith("Warning");
+ if(lastVoice!=null)lastVoice.setText("Queued: "+(warning?"Overspeed warning":s));
+ if(ready&&gate!=null)gate.offerDynamic(()->{
+  String msg=warning?"Warning. Your speed is "+speed+" kilometres per hour. Speed limit "+expected+". Please slow down.":s;
+  if(lastVoice!=null)lastVoice.setText("Last announcement: "+msg);
+  return msg;
+ },warning?2:1,()->active&&limit==expected&&(!warning||speed>limit+tolerance));
+ }
  @Override protected void onResume(){super.onResume();active=true;resetWarning();h.removeCallbacks(tick);h.post(tick);if(ready)speak("Speed limit "+limit+" kilometres per hour.");}
- @Override protected void onPause(){active=false;h.removeCallbacks(tick);if(voice!=null)voice.stop();super.onPause();}
- @Override protected void onDestroy(){h.removeCallbacks(tick);if(voice!=null)voice.shutdown();super.onDestroy();}
+ @Override protected void onPause(){active=false;h.removeCallbacks(tick);if(gate!=null)gate.cancel();else if(voice!=null)voice.stop();super.onPause();}
+ @Override protected void onDestroy(){h.removeCallbacks(tick);if(gate!=null)gate.close();if(voice!=null)voice.shutdown();super.onDestroy();}
 }

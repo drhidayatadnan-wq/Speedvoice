@@ -16,7 +16,7 @@ public class MainActivity extends Activity {
  private final Runnable refresh=new Runnable(){public void run(){float s=State.freshSpeed();status.setText(State.status+"\nSpeed: "+(Float.isNaN(s)?"Unavailable":Math.round(s)+" km/h")+"\nLimit: "+(State.limit<0?"Unavailable":State.limit+" km/h"));h.postDelayed(this,1000);}};
  @Override public void onCreate(Bundle b){super.onCreate(b);
  ScrollView sc=new ScrollView(this);LinearLayout l=new LinearLayout(this);l.setOrientation(LinearLayout.VERTICAL);int p=(int)(24*getResources().getDisplayMetrics().density);l.setPadding(p,p,p,p);sc.addView(l);setContentView(sc);
- TextView title=new TextView(this);title.setText("SpeedVoice");title.setTextSize(32);l.addView(title);
+ TextView title=new TextView(this);title.setText("SpeedVoice v0.7");title.setTextSize(32);l.addView(title);
  TextView intro=new TextView(this);intro.setText("Experimental • Ireland / km/h\nReads visible Google Maps labels or attempts local recognition of red circular signs. If recognition fails, alerts stop. GPS and map data may be wrong. Use road signs and your vehicle speedometer. Set up parked. No screenshots saved or transmitted.");l.addView(intro);
  status=new TextView(this);status.setTextSize(20);status.setPadding(0,p,0,p);l.addView(status);
  add(l,"Demo mode — test indoors",v->{stopService(new Intent(this,GpsService.class));startActivity(new Intent(this,DemoActivity.class));});
@@ -28,6 +28,18 @@ public class MainActivity extends Activity {
  TextView t=new TextView(this);t.setText("Warning threshold (not permission to exceed the limit)");l.addView(t);
  RadioGroup g=new RadioGroup(this);for(int n:new int[]{0,3,5}){RadioButton r=new RadioButton(this);r.setId(100+n);r.setText("+"+n+" km/h");g.addView(r);}
  g.check(100+getSharedPreferences("prefs",MODE_PRIVATE).getInt("tolerance",0));g.setOnCheckedChangeListener((group,id)->getSharedPreferences("prefs",MODE_PRIVATE).edit().putInt("tolerance",id-100).apply());l.addView(g);
+ final SharedPreferences prefs=getSharedPreferences("prefs",MODE_PRIVATE);
+ TextView a=new TextView(this);a.setText("Overspeed alert style");l.addView(a);
+ RadioGroup styles=new RadioGroup(this);String[] names={"Voice only","Single beep + voice","Double beep + voice","Double beep only"};
+ for(int i=0;i<names.length;i++){RadioButton option=new RadioButton(this);option.setId(200+i);option.setText(names[i]);styles.addView(option);}
+ styles.check(200+prefs.getInt("alert_mode",2));styles.setOnCheckedChangeListener((group,id)->prefs.edit().putInt("alert_mode",id-200).apply());l.addView(styles);
+ TextView repeat=new TextView(this);repeat.setText("Repeat warning while overspeeding");l.addView(repeat);
+ RadioGroup intervals=new RadioGroup(this);for(int n:new int[]{10,20,30}){RadioButton option=new RadioButton(this);option.setId(300+n);option.setText(n+" seconds");intervals.addView(option);}
+ intervals.check(300+prefs.getInt("alert_interval",10));intervals.setOnCheckedChangeListener((group,id)->prefs.edit().putInt("alert_interval",id-300).apply());l.addView(intervals);
+ TextView vol=new TextView(this);vol.setText("Alert volume: "+prefs.getInt("alert_volume",100)+"% of system volume");l.addView(vol);
+ SeekBar volume=new SeekBar(this);volume.setMax(75);volume.setProgress(prefs.getInt("alert_volume",100)-25);l.addView(volume);
+ volume.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onStartTrackingTouch(SeekBar b){}public void onStopTrackingTouch(SeekBar b){}public void onProgressChanged(SeekBar b,int value,boolean fromUser){int percent=value+25;vol.setText("Alert volume: "+percent+"% of system volume");if(fromUser)prefs.edit().putInt("alert_volume",percent).apply();}});
+
  }
  private void add(LinearLayout l,String label,View.OnClickListener listener){Button b=new Button(this);b.setText(label);b.setAllCaps(false);b.setOnClickListener(listener);l.addView(b);}
  private void startMonitor(){if(checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)!=PackageManager.PERMISSION_GRANTED){requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION,Manifest.permission.ACCESS_COARSE_LOCATION},10);return;}if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED){requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},11);return;}launch();}

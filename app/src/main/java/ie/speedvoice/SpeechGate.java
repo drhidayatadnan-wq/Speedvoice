@@ -1,6 +1,11 @@
 package ie.speedvoice;
 
 import android.content.Context;
+import android.content.SharedPreferences;
+import android.media.AudioTrack;
+import android.media.AudioFormat;
+import android.os.Bundle;
+import java.util.function.Supplier;
 import android.media.AudioAttributes;
 import android.media.AudioFocusRequest;
 import android.media.AudioManager;
@@ -15,6 +20,9 @@ import java.util.function.BooleanSupplier;
 final class SpeechGate {
  private static final long QUIET_MS=750, TTL_MS=20000, POLL_MS=200;
  private final AudioManager audio;
+ private final SharedPreferences prefs;
+ private AudioTrack tone;
+ private Runnable afterTone;
  private final TextToSpeech tts;
  private final Handler h;
  private final AudioAttributes attrs=new AudioAttributes.Builder()
@@ -26,13 +34,13 @@ final class SpeechGate {
  private Item pending,active;
  private String activeId;
  private static final class Item {
-  final String text; final int priority; final BooleanSupplier valid; final long created;
-  Item(String t,int p,BooleanSupplier v){text=t;priority=p;valid=v;created=SystemClock.elapsedRealtime();}
+  final Supplier<String> text; final int priority; final BooleanSupplier valid; final long created;
+  Item(Supplier<String> t,int p,BooleanSupplier v){text=t;priority=p;valid=v;created=SystemClock.elapsedRealtime();}
   boolean usable(long now){try{return now-created<=TTL_MS&&valid.getAsBoolean();}catch(RuntimeException e){return false;}}
  }
  private final Runnable poll=new Runnable(){public void run(){if(closed)return;try{tick();}catch(RuntimeException e){cancel();}finally{if(!closed)h.postDelayed(this,POLL_MS);}}};
  SpeechGate(Context c,TextToSpeech voice,Handler handler){
-  audio=c.getSystemService(AudioManager.class);tts=voice;h=handler;
+  audio=c.getSystemService(AudioManager.class);prefs=c.getSharedPreferences("prefs",Context.MODE_PRIVATE);tts=voice;h=handler;
   tts.setAudioAttributes(attrs);
   focus=new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
    .setAudioAttributes(attrs).setWillPauseWhenDucked(true)
@@ -47,6 +55,9 @@ final class SpeechGate {
   h.post(poll);
  }
  void offer(String text,int priority,BooleanSupplier valid){
+  offerDynamic(()->text,priority,valid);
+ }
+ void offerDynamic(Supplier<String> text,int priority,BooleanSupplier valid){
   if(closed)return;
   Item item=new Item(text,priority,valid);
   if(pending==null||!pending.usable(SystemClock.elapsedRealtime())||priority>=pending.priority)pending=item;
@@ -79,14 +90,59 @@ final class SpeechGate {
   holding=true;
   if(otherSpeech()||!pending.usable(now)){releaseFocus();quietSince=-1;return;}
   active=pending;pending=null;activeId="speedvoice-gate-"+(++seq);started=now;
-  if(tts.speak(active.text,TextToSpeech.QUEUE_FLUSH,null,activeId)!=TextToSpeech.SUCCESS)interrupt(false);
+  int mode=prefs.getInt("alert_mode",2);
+  if(active.priority==2&&mode!=0){
+   if(startTone(mode==1?1:2)){
+    final String id=activeId;
+    afterTone=()->{
+     afterTone=null;stopTone();
+     if(active==null||!id.equals(activeId))return;
+     if(!active.usable(SystemClock.elapsedRealtime())){interrupt(false);return;}
+     if(otherSpeech()){interrupt(true);return;}
+     if(mode==3)finished(id);else speakActive();
+    };
+    h.postDelayed(afterTone,mode==1?300:540);
+    return;
+   }
+   if(mode==3){finished(activeId);return;}
+  }
+  speakActive();
+ }
+ private float volume(){return Math.max(.25f,Math.min(1f,prefs.getInt("alert_volume",100)/100f));}
+ private void speakActive(){
+  if(active==null)return;
+  String text=active.text.get();
+  if(text==null||text.isEmpty()){interrupt(false);return;}
+  Bundle params=new Bundle();params.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME,volume());
+  if(tts.speak(text,TextToSpeech.QUEUE_FLUSH,params,activeId)!=TextToSpeech.SUCCESS)interrupt(false);
+ }
+ private boolean startTone(int count){
+  stopTone();
+  final int rate=24000,on=rate*150/1000,gap=rate*80/1000,end=rate*20/1000;
+  short[] pcm=new short[on*count+gap*(count-1)+end];
+  for(int b=0;b<count;b++)for(int i=0;i<on;i++){
+   double env=Math.min(1.0,Math.min(i,on-1-i)/(rate*.012));
+   pcm[b*(on+gap)+i]=(short)(11000*env*Math.sin(2*Math.PI*880*i/rate));
+  }
+  try{
+   tone=new AudioTrack.Builder()
+    .setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
+    .setAudioFormat(new AudioFormat.Builder().setSampleRate(rate).setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
+    .setTransferMode(AudioTrack.MODE_STATIC).setBufferSizeInBytes(pcm.length*2).build();
+   if(tone.getState()!=AudioTrack.STATE_INITIALIZED||tone.write(pcm,0,pcm.length)!=pcm.length){stopTone();return false;}
+   tone.setVolume(volume());tone.play();return true;
+  }catch(RuntimeException e){stopTone();return false;}
+ }
+ private void stopTone(){
+  if(afterTone!=null){h.removeCallbacks(afterTone);afterTone=null;}
+  if(tone!=null){try{tone.stop();}catch(RuntimeException ignored){}try{tone.release();}catch(RuntimeException ignored){}tone=null;}
  }
  private void finished(String id){
   if(activeId==null||!activeId.equals(id))return;
-  active=null;activeId=null;releaseFocus();quietSince=-1;
+  stopTone();active=null;activeId=null;releaseFocus();quietSince=-1;
  }
  private void interrupt(boolean retry){
-  Item old=active;active=null;activeId=null;
+  Item old=active;active=null;activeId=null;stopTone();
   if(old!=null)tts.stop();
   releaseFocus();quietSince=-1;
   if(retry&&old!=null&&old.usable(SystemClock.elapsedRealtime())&&(pending==null||pending.priority<old.priority))pending=old;
