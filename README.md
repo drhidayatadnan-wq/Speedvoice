@@ -1,2 +1,2 @@
-# SpeedVoice
-Experimental Android speed-limit reader for visible Google Maps navigation in Ireland (km/h). Not a safety system; follow road signs and vehicle speedometer. Setup while parked. No screenshots saved or transmitted. Prototype, not road-tested.
+# SpeedVoice v0.2
+Experimental Android 14+ screen reader for visible portrait Google Maps in Ireland (km/h). GPS speed and on-device OCR, no screenshot storage or network transmission by this app. Requires accessibility permission. No automatic Bluetooth startup. Not a driving safety system. Map/GPS/recognition may be wrong; check road signs and vehicle speedometer. Setup while parked. Screen recognition and Android build not yet verified. Build debug APK from Actions. Install only if you trust the code; review Android permission warnings.
