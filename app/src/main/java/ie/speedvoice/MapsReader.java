@@ -10,6 +10,7 @@ import java.util.*;
 public class MapsReader extends AccessibilityService {
  private final Handler h=new Handler(Looper.getMainLooper());
  private TextToSpeech tts;
+ private SpeechGate gate;
  private VisualReader visual;
  private boolean busy=false;
  private long visualAt=0;
@@ -19,10 +20,22 @@ public class MapsReader extends AccessibilityService {
  private long lastObservation=-1,observation=0,overSince=-1,lastWarn=-100000,missingSince=-1;
  private final Runnable poll=new Runnable(){public void run(){try{tick();}catch(RuntimeException e){invalidate();State.status="Reader unavailable";}finally{h.postDelayed(this,1000);}}};
  @Override protected void onServiceConnected(){super.onServiceConnected();visual=new VisualReader();
- tts=new TextToSpeech(this,status->{if(status==TextToSpeech.SUCCESS&&tts!=null){int result=tts.setLanguage(Locale.UK);ready=result>=TextToSpeech.LANG_AVAILABLE;tts.setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build());}});
+ tts=new TextToSpeech(this,status->{if(status==TextToSpeech.SUCCESS&&tts!=null){int result=tts.setLanguage(Locale.UK);ready=result>=TextToSpeech.LANG_AVAILABLE;if(ready){if(gate!=null)gate.close();gate=new SpeechGate(this,tts,h);}}});
  h.removeCallbacks(poll);h.post(poll);}
  @Override public void onAccessibilityEvent(AccessibilityEvent e){}
- private void speak(String s){if(ready&&tts!=null)tts.speak(s,TextToSpeech.QUEUE_FLUSH,null,"speedvoice-"+SystemClock.elapsedRealtime());}
+ private void speak(String s){
+ if(!ready||gate==null)return;
+ final int limit=confirmed;
+ final boolean warning=s.startsWith("Warning"),unavailable=s.startsWith("Speed limit unavailable");
+ gate.offer(s,warning?2:unavailable?3:1,()->{
+  if(!alive||!State.running||activeMapsWindow()<0)return false;
+  if(unavailable)return confirmed<0&&everHadLimit;
+  if(confirmed!=limit||limit<=0||State.limit!=limit)return false;
+  if(!warning)return true;
+  float speed=State.freshSpeed();
+  return !Float.isNaN(speed)&&speed>limit+getSharedPreferences("prefs",MODE_PRIVATE).getInt("tolerance",0);
+ });
+ }
  private void invalidate(){confirmed=candidate=-1;count=0;lastObservation=-1;State.limit=-1;overSince=-1;lastWarn=-100000;}
  private void clearVisual(){visualAt=0;visualValue=-1;visualWindow=-1;generation++;}
  private int activeMapsWindow(){AccessibilityNodeInfo root=getRootInActiveWindow();if(root==null)return -1;try{return "com.google.android.apps.maps".contentEquals(root.getPackageName())?root.getWindowId():-1;}finally{root.recycle();}}
@@ -54,7 +67,7 @@ public class MapsReader extends AccessibilityService {
  }
  private void read(CharSequence text,Set<Integer> found){if(text!=null){int x=LimitParser.parse(text.toString());if(x>0)found.add(x);}}
  private void tick(){
- if(!State.running){clearVisual();invalidate();everHadLimit=lostSpoken=false;missingSince=-1;return;}
+ if(!State.running){if(gate!=null)gate.cancel();clearVisual();invalidate();everHadLimit=lostSpoken=false;missingSince=-1;return;}
  long now=SystemClock.elapsedRealtime();int value=readLimit();
  if(value<0){invalidate();State.status="No readable speed limit — use visible portrait Maps navigation";if(missingSince<0)missingSince=now;if(everHadLimit&&!lostSpoken&&now-missingSince>=3000){speak("Speed limit unavailable. Check road signs.");lostSpoken=true;}return;}
  missingSince=-1;lostSpoken=false;
@@ -65,6 +78,6 @@ public class MapsReader extends AccessibilityService {
  if(Float.isNaN(speed)){overSince=-1;return;}int tolerance=getSharedPreferences("prefs",MODE_PRIVATE).getInt("tolerance",0);
  if(speed>confirmed+tolerance){if(overSince<0)overSince=now;if(now-overSince>=3000&&now-lastWarn>=10000){speak("Warning. Speed limit "+confirmed+". Please slow down.");lastWarn=now;}}else{overSince=-1;lastWarn=-100000;}
  }
- @Override public void onInterrupt(){if(tts!=null)tts.stop();}
- @Override public void onDestroy(){alive=false;h.removeCallbacks(poll);invalidate();clearVisual();if(visual!=null)visual.close();if(tts!=null)tts.shutdown();super.onDestroy();}
+ @Override public void onInterrupt(){if(gate!=null)gate.cancel();else if(tts!=null)tts.stop();}
+ @Override public void onDestroy(){alive=false;h.removeCallbacks(poll);invalidate();clearVisual();if(visual!=null)visual.close();if(gate!=null)gate.close();if(tts!=null)tts.shutdown();super.onDestroy();}
 }
