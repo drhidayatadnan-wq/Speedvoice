@@ -20,7 +20,6 @@ public class MainActivity extends Activity {
  TextView intro=new TextView(this);intro.setText("Experimental • Ireland / km/h\nReads visible Google Maps labels or attempts local recognition of red circular signs. If recognition fails, alerts stop. GPS and map data may be wrong. Use road signs and your vehicle speedometer. Set up parked. No screenshots saved or transmitted.");l.addView(intro);
  status=new TextView(this);status.setTextSize(20);status.setPadding(0,p,0,p);l.addView(status);
  add(l,"Demo mode — test indoors",v->{stopService(new Intent(this,GpsService.class));startActivity(new Intent(this,DemoActivity.class));});
- add(l,"Video OCR test — choose MP4",v->{stopService(new Intent(this,GpsService.class));startActivity(new Intent(this,VideoTestActivity.class));});
  add(l,"1. Enable Maps reader (Accessibility)",v->startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
  add(l,"2. Start monitoring (allow precise GPS)",v->startMonitor());
  add(l,"3. Open Google Maps",v->{Intent i=getPackageManager().getLaunchIntentForPackage("com.google.android.apps.maps");if(i!=null)startActivity(i);else Toast.makeText(this,"Google Maps not installed",Toast.LENGTH_SHORT).show();});
