@@ -35,3 +35,6 @@ Experimental Android 14+ screen reader for visible portrait Google Maps in Irela
 
 ## v0.3 demo
 Open Demo mode to test simulated speed limits, GPS-free speed and spoken warnings indoors. The demo stops live GPS monitoring and does not test Maps screen recognition. Voice requires an Android TTS engine. New CI debug signing keys can require uninstalling the earlier APK before installation; re-enable permissions afterward.
+
+## Privacy notice
+See the [Development privacy notice](PRIVACY.md). The latest experimental phone branch includes an in-app acknowledgement and withdrawal control; the original v0.3 prototype remains unchanged.
