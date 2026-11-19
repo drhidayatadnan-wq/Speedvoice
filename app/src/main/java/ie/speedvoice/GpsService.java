@@ -67,6 +67,7 @@ public class GpsService extends Service implements LocationListener {
    if(State.running){State.muted=!State.muted;updateNotification(true);}else stopSelf();
    return START_NOT_STICKY;
   }
+  if(!Consent.accepted(this)){stopSelf();return START_NOT_STICKY;}
   if(State.running){updateNotification(true);return START_NOT_STICKY;}
   if(checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)!=PackageManager.PERMISSION_GRANTED){stopSelf();return START_NOT_STICKY;}
   nm=getSystemService(NotificationManager.class);

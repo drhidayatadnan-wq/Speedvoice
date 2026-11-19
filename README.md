@@ -40,3 +40,6 @@ Default two short 880 Hz overspeed beeps before voice; speed-limit announcements
 
 ## v0.7.2 notification
 Ongoing monitoring notification with a monochrome speedometer status icon, large colored logo, current GPS speed and confirmed limit, overspeed text and requested accent, and mute/unmute and stop actions. Updates at most once per second when displayed data changes. Mute affects live alerts including beeps, not monitoring; resets at next start. Opening the notification shade can obscure Maps and invalidate the limit, as before. Android controls icon color, notification presentation, and permission. Set up parked.
+
+## v0.7.3 disclosure
+Live monitoring and the app's accessibility setup shortcut require affirmative acknowledgement of the in-app safety and privacy disclosure. The user can decline or withdraw acknowledgement and stop monitoring. The disclosure is not a waiver of legal rights. See [Development privacy notice](PRIVACY.md). This update still requires device testing.

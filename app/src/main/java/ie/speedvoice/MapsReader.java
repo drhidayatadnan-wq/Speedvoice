@@ -32,7 +32,7 @@ public class MapsReader extends AccessibilityService {
   float current=State.freshSpeed();
   return Float.isNaN(current)?null:"Warning. Your speed is "+Math.round(current)+" kilometres per hour. Speed limit "+limit+". Please slow down.";
  },warning?2:unavailable?3:1,()->{
-  if(!alive||!State.running||State.muted||activeMapsWindow()<0)return false;
+  if(!alive||!State.running||!Consent.accepted(this)||State.muted||activeMapsWindow()<0)return false;
   if(unavailable)return confirmed<0&&everHadLimit;
   if(confirmed!=limit||limit<=0||State.limit!=limit)return false;
   if(!warning)return true;
@@ -58,7 +58,7 @@ public class MapsReader extends AccessibilityService {
  busy=true;final int token=generation;final long started=SystemClock.elapsedRealtime();
  try{takeScreenshotOfWindow(window,getMainExecutor(),new TakeScreenshotCallback(){
  @Override public void onSuccess(ScreenshotResult shot){Bitmap copy=null;HardwareBuffer buffer=shot.getHardwareBuffer();
- try{if(alive&&State.running&&token==generation&&activeMapsWindow()==window){Bitmap hw=Bitmap.wrapHardwareBuffer(buffer,shot.getColorSpace());if(hw!=null){try{copy=hw.copy(Bitmap.Config.ARGB_8888,false);}finally{hw.recycle();}}}}catch(RuntimeException ignored){}finally{buffer.close();}
+ try{if(alive&&State.running&&Consent.accepted(this)&&token==generation&&activeMapsWindow()==window){Bitmap hw=Bitmap.wrapHardwareBuffer(buffer,shot.getColorSpace());if(hw!=null){try{copy=hw.copy(Bitmap.Config.ARGB_8888,false);}finally{hw.recycle();}}}}catch(RuntimeException ignored){}finally{buffer.close();}
  if(copy==null){busy=false;visualAt=0;visualValue=-1;return;}
  visual.scan(copy,value->{busy=false;if(alive&&State.running&&token==generation&&activeMapsWindow()==window&&SystemClock.elapsedRealtime()-started<=1800){visualValue=value;visualAt=started;}else{visualAt=0;visualValue=-1;}});
  }
@@ -71,7 +71,7 @@ public class MapsReader extends AccessibilityService {
  }
  private void read(CharSequence text,Set<Integer> found){if(text!=null){int x=LimitParser.parse(text.toString());if(x>0)found.add(x);}}
  private void tick(){
- if(!State.running){if(gate!=null)gate.cancel();clearVisual();invalidate();everHadLimit=lostSpoken=false;missingSince=-1;return;}
+ if(!State.running||!Consent.accepted(this)){if(gate!=null)gate.cancel();clearVisual();invalidate();everHadLimit=lostSpoken=false;missingSince=-1;return;}
  long now=SystemClock.elapsedRealtime();int value=readLimit();
  if(value<0){invalidate();State.status="No readable speed limit — use visible portrait Maps navigation";if(missingSince<0)missingSince=now;if(everHadLimit&&!lostSpoken&&now-missingSince>=3000){speak("Speed limit unavailable. Check road signs.");lostSpoken=true;}return;}
  missingSince=-1;lostSpoken=false;
