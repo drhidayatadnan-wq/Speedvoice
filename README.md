@@ -9,3 +9,6 @@ Live Maps mode now defers speech while Android reports navigation or other speec
 
 ## v0.7 phone
 Default two short 880 Hz overspeed beeps before voice; speed-limit announcements remain voice-only. Voice uses fresh GPS speed at dispatch. Configurable voice-only, single beep + voice, double beep + voice, double beep only; repeat interval 10/20/30 seconds and alert volume 25–100% of system stream volume. Both tone and voice share the audio-priority gate and are revalidated before voice. Demo mode uses the same gate and alert settings. Android 14+ phone version; no automatic Bluetooth startup or Android Auto screen support. Experimental; requires device testing.
+
+## v0.7.2 notification
+Ongoing monitoring notification with a monochrome speedometer status icon, large colored logo, current GPS speed and confirmed limit, overspeed text and requested accent, and mute/unmute and stop actions. Updates at most once per second when displayed data changes. Mute affects live alerts including beeps, not monitoring; resets at next start. Opening the notification shade can obscure Maps and invalidate the limit, as before. Android controls icon color, notification presentation, and permission. Set up parked.

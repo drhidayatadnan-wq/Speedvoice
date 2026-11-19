@@ -24,7 +24,7 @@ public class MapsReader extends AccessibilityService {
  h.removeCallbacks(poll);h.post(poll);}
  @Override public void onAccessibilityEvent(AccessibilityEvent e){}
  private void speak(String s){
- if(!ready||gate==null)return;
+ if(!ready||gate==null||State.muted)return;
  final int limit=confirmed;
  final boolean warning=s.startsWith("Warning"),unavailable=s.startsWith("Speed limit unavailable");
  gate.offerDynamic(()->{
@@ -32,7 +32,7 @@ public class MapsReader extends AccessibilityService {
   float current=State.freshSpeed();
   return Float.isNaN(current)?null:"Warning. Your speed is "+Math.round(current)+" kilometres per hour. Speed limit "+limit+". Please slow down.";
  },warning?2:unavailable?3:1,()->{
-  if(!alive||!State.running||activeMapsWindow()<0)return false;
+  if(!alive||!State.running||State.muted||activeMapsWindow()<0)return false;
   if(unavailable)return confirmed<0&&everHadLimit;
   if(confirmed!=limit||limit<=0||State.limit!=limit)return false;
   if(!warning)return true;
@@ -79,7 +79,7 @@ public class MapsReader extends AccessibilityService {
  if(lastObservation!=observation){count++;lastObservation=observation;}
  if(count>=2&&value!=confirmed){confirmed=value;State.limit=value;everHadLimit=true;overSince=-1;lastWarn=-100000;speak("Speed limit "+value+" kilometres per hour.");}
  if(confirmed<0)return;float speed=State.freshSpeed();State.status=Float.isNaN(speed)?"Limit "+confirmed+"; GPS speed unavailable":"Monitoring • limit "+confirmed+" km/h";
- if(Float.isNaN(speed)){overSince=-1;return;}int tolerance=getSharedPreferences("prefs",MODE_PRIVATE).getInt("tolerance",0);
+ if(State.muted||Float.isNaN(speed)){overSince=-1;lastWarn=-100000;return;}int tolerance=getSharedPreferences("prefs",MODE_PRIVATE).getInt("tolerance",0);
  if(speed>confirmed+tolerance){if(overSince<0)overSince=now;if(now-overSince>=3000&&now-lastWarn>=1000L*getSharedPreferences("prefs",MODE_PRIVATE).getInt("alert_interval",10)){speak("Warning. Speed limit "+confirmed+". Please slow down.");lastWarn=now;}}else{overSince=-1;lastWarn=-100000;}
  }
  @Override public void onInterrupt(){if(gate!=null)gate.cancel();else if(tts!=null)tts.stop();}
