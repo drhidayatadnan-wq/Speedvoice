@@ -19,6 +19,10 @@ public class VideoTestActivity extends Activity {
  private final ExecutorService worker = Executors.newSingleThreadExecutor();
  private MediaMetadataRetriever retriever;
  private VisualReader reader;
+ private VideoSpeedReader speedReader;
+ private long overSince=-1,lastWarn=-1;
+ private int lastSpoken=-1;
+ private TextView lastAlert;
  private TextToSpeech voice;
  private boolean ready, running, closing, decoding, active;
  private int generation, candidate=-1, confirmed=-1, count, missed;
@@ -30,7 +34,7 @@ public class VideoTestActivity extends Activity {
  private final Runnable next = () -> sample();
  @Override public void onCreate(Bundle saved) {
   super.onCreate(saved);
-  reader=new VisualReader();
+  reader=new VisualReader(); speedReader=new VideoSpeedReader();
   LinearLayout l=new LinearLayout(this);
   l.setOrientation(LinearLayout.VERTICAL);
   int p=(int)(16*getResources().getDisplayMetrics().density);
@@ -39,6 +43,7 @@ public class VideoTestActivity extends Activity {
   TextView title=new TextView(this); title.setText("SpeedVoice — Video OCR test"); title.setTextSize(22); l.addView(title);
   status=new TextView(this); status.setText("SIMULATION ONLY. Choose a portrait navigation MP4. Live monitoring remains off."); l.addView(status);
   detected=new TextView(this); detected.setTextSize(27); detected.setText("Limit: unavailable"); l.addView(detected);
+  lastAlert=new TextView(this);lastAlert.setText("Last announcement: none");l.addView(lastAlert);
   Button choose=new Button(this); choose.setText("Choose navigation video"); l.addView(choose);
   choose.setOnClickListener(v->{pause(); Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT); i.setType("video/*"); i.addCategory(Intent.CATEGORY_OPENABLE); startActivityForResult(i,42);});
   play=new Button(this); play.setText("Start test"); play.setEnabled(false); l.addView(play);
@@ -48,8 +53,8 @@ public class VideoTestActivity extends Activity {
   frame=new ImageView(this);frame.setScaleType(ImageView.ScaleType.FIT_CENTER);l.addView(frame,new LinearLayout.LayoutParams(-1,0,1));
   voice=new TextToSpeech(this,r->{if(!closing&&voice!=null&&r==TextToSpeech.SUCCESS){ready=voice.setLanguage(Locale.UK)>=TextToSpeech.LANG_AVAILABLE;}});
  }
- private void reset(){timeMs=0;candidate=confirmed=-1;count=missed=0;detected.setText("Limit: unavailable");}
- private void pause(){running=false;generation++;main.removeCallbacks(next);if(play!=null)play.setText("Start / resume test");if(voice!=null)voice.stop();}
+ private void reset(){timeMs=0;candidate=confirmed=-1;count=missed=0;overSince=lastWarn=-1;lastSpoken=-1;lastAlert.setText("Last announcement: none");detected.setText("Limit: unavailable");}
+ private void pause(){running=false;generation++;overSince=lastWarn=-1;main.removeCallbacks(next);if(play!=null)play.setText("Start / resume test");if(voice!=null)voice.stop();}
  @Override protected void onActivityResult(int req,int result,Intent data){
   super.onActivityResult(req,result,data);
   if(req!=42||result!=RESULT_OK||data==null||data.getData()==null)return;
@@ -75,25 +80,31 @@ public class VideoTestActivity extends Activity {
    final Bitmap captured=bmp;
    main.post(()->{
     if(closing||token!=generation||!running){if(captured!=null)captured.recycle();decoding=false;if(running&&!closing)sample();return;}
-    if(captured==null){accept(token,stamp,-1);return;}
+    if(captured==null){accept(token,stamp,-1,-1);return;}
     Bitmap ui=null;
     try{ui=captured.copy(Bitmap.Config.ARGB_8888,false);}catch(Exception ignored){}
     if(ui!=null){frame.setImageBitmap(ui);if(preview!=null)preview.recycle();preview=ui;}
-    reader.scan(captured,v->accept(token,stamp,v));
+    Bitmap speedCrop=null;try{speedCrop=VideoSpeedReader.crop(captured);}catch(RuntimeException ignored){}
+    final Bitmap crop=speedCrop;
+    reader.scan(captured,v->{if(closing||token!=generation||!running){if(crop!=null)crop.recycle();accept(token,stamp,-1,-1);return;}if(crop==null){accept(token,stamp,v,-1);return;}speedReader.scan(crop,sp->accept(token,stamp,v,sp));});
    });
   });
  }
- private void accept(int token,long stamp,int value){
+ private void say(String msg,long stamp){lastAlert.setText("Last announcement: "+msg);if(ready&&voice!=null)voice.speak(msg,TextToSpeech.QUEUE_ADD,null,"video-"+stamp+"-"+msg.hashCode());}
+ private void accept(int token,long stamp,int value,int speed){
   decoding=false;
   if(closing||token!=generation||!running){if(running&&!closing)sample();return;}
-  if(value<0){candidate=-1;count=0;missed++;if(missed>=2)confirmed=-1;detected.setText("No readable sign (frame "+stamp/1000+"s)");}
-  else{missed=0;if(value!=candidate){candidate=value;count=1;}else count++;
-   if(count>=2&&confirmed!=value){confirmed=value;if(ready&&voice!=null)voice.speak("Speed limit "+value+" kilometres per hour",TextToSpeech.QUEUE_FLUSH,null,"video-"+stamp);}
-   detected.setText("OCR: "+value+" km/h"+(count>=2?" — confirmed":" — confirming"));
+  if(value<0){candidate=confirmed=-1;count=0;overSince=lastWarn=-1;}
+  else{if(value!=candidate){candidate=value;confirmed=-1;count=1;overSince=lastWarn=-1;}else count++;
+   if(count>=2&&confirmed!=value){confirmed=value;if(lastSpoken!=value){say("Speed limit "+value+" kilometres per hour.",stamp);lastSpoken=value;}}
   }
-  timeMs=stamp+1000;main.postDelayed(next,350);
+  int tolerance=0;boolean over=confirmed>0&&speed>=0&&speed>confirmed+tolerance;
+  if(over){if(overSince<0)overSince=stamp;if(stamp-overSince>=3000&&(lastWarn<0||stamp-lastWarn>=10000)){say("Warning. Your speed is "+speed+". Speed limit "+confirmed+". Please slow down.",stamp);lastWarn=stamp;}}
+  else{overSince=lastWarn=-1;}
+  detected.setText("Limit: "+(value<0?"unreadable":value+" km/h"+(confirmed>0?"":" (confirming)"))+"\nVehicle: "+(speed<0?"unreadable":speed+" km/h")+"\n"+(over?"OVERSPEED +"+(speed-confirmed)+" km/h":(confirmed<0||speed<0?"Cannot compare":"Within limit")));
+  timeMs=stamp+1000;main.postDelayed(next,1000);
  }
  @Override protected void onResume(){super.onResume();active=true;}
  @Override protected void onPause(){active=false;if(running)pause();super.onPause();}
- @Override protected void onDestroy(){closing=true;pause();if(voice!=null)voice.shutdown();if(reader!=null)reader.close();frame.setImageDrawable(null);if(preview!=null)preview.recycle();worker.execute(()->{if(retriever!=null){try{retriever.release();}catch(Exception ignored){}}});worker.shutdown();super.onDestroy();}
+ @Override protected void onDestroy(){closing=true;pause();if(voice!=null)voice.shutdown();if(reader!=null)reader.close();if(speedReader!=null)speedReader.close();frame.setImageDrawable(null);if(preview!=null)preview.recycle();worker.execute(()->{if(retriever!=null){try{retriever.release();}catch(Exception ignored){}}});worker.shutdown();super.onDestroy();}
 }

@@ -3,11 +3,11 @@ android {
  namespace 'ie.speedvoice'
  compileSdk 35
  defaultConfig {
- applicationId 'ie.speedvoice'
+ applicationId 'ie.speedvoice.videotest'
  minSdk 34
  targetSdk 35
- versionCode 4
- versionName '0.4-video-test'
+ versionCode 5
+ versionName '0.5-video-test'
  }
  compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
