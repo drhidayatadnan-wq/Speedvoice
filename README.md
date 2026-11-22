@@ -49,3 +49,6 @@ Based on known-working v0.7.2. Corrects v0.7.3 callback context compile error an
 
 ## v0.8.1 reliability test
 Separate experimental repair branch based on v0.8: prevents obsolete screenshot/OCR callbacks from corrupting later captures, retries if OCR stalls, handles null active window package data, and surfaces screenshot/OCR failure diagnostics on the main screen. The known-working v0.7.2 and v0.8 branches are not changed. This is a code-level correction; its Android build and live screen recognition still require validation before use. Never rely on this prototype for driving decisions.
+
+## v0.8.2 speech-diagnostics test (experimental)
+Based on v0.8.1 in a separate branch. Routes speech and alert beeps using Android navigation guidance audio (normally controlled by media volume), with best-effort audio-focus protection. Adds independent Test voice and Test beep buttons that work without GPS or Google Maps, shows live Reader and Voice diagnostics, improves English TTS locale fallbacks, and queues one non-speed-limit monitoring acknowledgement after Maps becomes visible. Demo displays the speech-gate status. **Voice tests and a successful build do not validate speed-limit recognition.** Test only while stationary; do not rely on alerts for driving or legal compliance. Older branches are unchanged.
