@@ -24,11 +24,25 @@ public class MapsReader extends AccessibilityService {
  private long lastObservation=-1,observation=0,overSince=-1,lastWarn=-100000,missingSince=-1;
  private final Runnable poll=new Runnable(){public void run(){try{tick();}catch(RuntimeException e){invalidate();State.status="Reader unavailable";}finally{h.postDelayed(this,1000);}}};
  @Override protected void onServiceConnected(){super.onServiceConnected();visual=new VisualReader();
- tts=new TextToSpeech(this,status->{if(status==TextToSpeech.SUCCESS&&tts!=null){int result=tts.setLanguage(Locale.UK);ready=result>=TextToSpeech.LANG_AVAILABLE;if(ready){if(gate!=null)gate.close();gate=new SpeechGate(this,tts,h);}}});
+ State.readerDiagnostic="Reader enabled; waiting for monitoring";
+ State.voiceDiagnostic="Initialising speech engine";
+ tts=new TextToSpeech(this,status->h.post(()->{
+  if(!alive)return;
+  if(status!=TextToSpeech.SUCCESS||tts==null){State.voiceDiagnostic="TTS initialisation failed; use Test voice";return;}
+  int result=tts.setLanguage(Locale.UK);
+  if(result<TextToSpeech.LANG_AVAILABLE)result=tts.setLanguage(Locale.US);
+  if(result<TextToSpeech.LANG_AVAILABLE)result=tts.setLanguage(Locale.ENGLISH);
+  ready=result>=TextToSpeech.LANG_AVAILABLE;
+  if(!ready){State.voiceDiagnostic="English voice data unavailable; check phone TTS settings";return;}
+  if(gate!=null)gate.close();
+  gate=new SpeechGate(this,tts,h);
+  State.voiceDiagnostic="Voice engine ready; waiting for readable speed limit";
+ }));
  h.removeCallbacks(poll);h.post(poll);}
  @Override public void onAccessibilityEvent(AccessibilityEvent e){}
  private void speak(String s){
- if(!ready||gate==null||State.muted)return;
+ if(!ready||gate==null){State.voiceDiagnostic="Voice not ready; check text-to-speech settings";return;}
+ if(State.muted){State.voiceDiagnostic="Alerts muted";return;}
  final int limit=confirmed;
  final boolean warning=s.startsWith("Warning"),unavailable=s.startsWith("Speed limit unavailable"),recovery=s.startsWith("Back within");
  gate.offerDynamic(()->{
@@ -97,5 +111,5 @@ public class MapsReader extends AccessibilityService {
  if(speed>confirmed+tolerance){belowSince=-1;if(overSince<0)overSince=now;if(now-overSince>=3000&&now-lastWarn>=1000L*getSharedPreferences("prefs",MODE_PRIVATE).getInt("alert_interval",10)){speak("Warning. Speed limit "+confirmed+". Please slow down.");warned=true;lastWarn=now;}}else{overSince=-1;lastWarn=-100000;if(warned&&speed<=confirmed){if(belowSince<0)belowSince=now;if(now-belowSince>=2000){warned=false;belowSince=-1;if(getSharedPreferences("prefs",MODE_PRIVATE).getBoolean("recovery_voice",true))speak("Back within the detected speed limit.");}}else belowSince=-1;}
  }
  @Override public void onInterrupt(){if(gate!=null)gate.cancel();else if(tts!=null)tts.stop();}
- @Override public void onDestroy(){alive=false;h.removeCallbacks(poll);invalidate();clearVisual();if(visual!=null)visual.close();if(gate!=null)gate.close();if(tts!=null)tts.shutdown();super.onDestroy();}
+ @Override public void onDestroy(){State.voiceDiagnostic="Reader stopped";alive=false;h.removeCallbacks(poll);invalidate();clearVisual();if(visual!=null)visual.close();if(gate!=null)gate.close();if(tts!=null)tts.shutdown();super.onDestroy();}
 }
