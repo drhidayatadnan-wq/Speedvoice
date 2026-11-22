@@ -12,6 +12,10 @@ import android.content.pm.PackageManager;
 import android.os.*;
 import android.provider.Settings;
 import android.speech.tts.TextToSpeech;
+import android.speech.tts.UtteranceProgressListener;
+import android.media.AudioAttributes;
+import android.media.AudioManager;
+import android.media.ToneGenerator;
 import android.view.View;
 import android.widget.*;
 import java.util.Locale;
@@ -19,10 +23,11 @@ public class MainActivity extends Activity {
  private TextView status;
  private final Handler h=new Handler(Looper.getMainLooper());
  private TextToSpeech testVoice;
- private final Runnable refresh=new Runnable(){public void run(){float s=State.freshSpeed();status.setText(State.status+"\nSpeed: "+(Float.isNaN(s)?"Unavailable":Math.round(s)+" km/h")+"\nLimit: "+(State.limit<0?"Unavailable":State.limit+" km/h")+"\nReader: "+State.readerDiagnostic);h.postDelayed(this,1000);}};
+ private int voiceTestGeneration=0;
+ private final Runnable refresh=new Runnable(){public void run(){float s=State.freshSpeed();status.setText(State.status+"\nSpeed: "+(Float.isNaN(s)?"Unavailable":Math.round(s)+" km/h")+"\nLimit: "+(State.limit<0?"Unavailable":State.limit+" km/h")+"\nReader: "+State.readerDiagnostic+"\nVoice: "+State.voiceDiagnostic);h.postDelayed(this,1000);}};
  @Override public void onCreate(Bundle b){super.onCreate(b);
  ScrollView sc=new ScrollView(this);LinearLayout l=new LinearLayout(this);l.setOrientation(LinearLayout.VERTICAL);int p=(int)(24*getResources().getDisplayMetrics().density);l.setPadding(p,p,p,p);sc.addView(l);setContentView(sc);
- TextView title=new TextView(this);title.setText("SpeedVoice v0.8.1");title.setTextSize(32);l.addView(title);
+ TextView title=new TextView(this);title.setText("SpeedVoice v0.8.2");title.setTextSize(32);l.addView(title);
  TextView intro=new TextView(this);intro.setText("Experimental • Ireland / km/h\nReads visible Google Maps labels or attempts local recognition of red circular signs. If recognition fails, alerts stop. GPS and map data may be wrong. Use road signs and your vehicle speedometer. Set up parked. No screenshots saved or transmitted.");l.addView(intro);
  status=new TextView(this);status.setTextSize(20);status.setPadding(0,p,0,p);l.addView(status);
  add(l,"Demo mode — test indoors",v->{stopService(new Intent(this,GpsService.class));startActivity(new Intent(this,DemoActivity.class));});
@@ -33,7 +38,9 @@ public class MainActivity extends Activity {
  add(l,"Safety and privacy notice",v->showDisclosure(null));
  add(l,"Read privacy notice on GitHub",v->{try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse("https://github.com/drhidayatadnan-wq/Speedvoice/blob/main/PRIVACY.md")));}catch(RuntimeException e){Toast.makeText(this,"No browser available",Toast.LENGTH_LONG).show();}});
  add(l,"Withdraw acknowledgement / stop monitoring",v->{Consent.revoke(this);getSharedPreferences("prefs",MODE_PRIVATE).edit().remove("car_address").apply();getSystemService(android.app.NotificationManager.class).cancel(81);stopService(new Intent(this,GpsService.class));State.running=false;State.limit=-1;State.clearGps();Toast.makeText(this,"Monitoring stopped. Disable accessibility access in Android Settings if no longer needed.",Toast.LENGTH_LONG).show();});
- add(l,"Test voice",v->{if(testVoice!=null)testVoice.shutdown();testVoice=new TextToSpeech(this,result->{if(result==TextToSpeech.SUCCESS&&testVoice!=null){testVoice.setLanguage(Locale.UK);testVoice.speak("SpeedVoice test. Speed limit fifty kilometres per hour.",TextToSpeech.QUEUE_FLUSH,null,"test");}});});
+ add(l,"Test voice (no Maps/GPS needed)",v->testVoiceNow());
+ add(l,"Test beep (media volume)",v->testBeep());
+ TextView audioHelp=new TextView(this);audioHelp.setText("Voice and alerts use the navigation/media volume channel. Test with media volume raised while safely parked. If the test speaks but live monitoring stays silent, check Reader and Voice diagnostic lines above.");l.addView(audioHelp);
  TextView t=new TextView(this);t.setText("Warning threshold (not permission to exceed the limit)");l.addView(t);
  RadioGroup g=new RadioGroup(this);for(int n:new int[]{0,3,5}){RadioButton r=new RadioButton(this);r.setId(100+n);r.setText("+"+n+" km/h");g.addView(r);}
  g.check(100+getSharedPreferences("prefs",MODE_PRIVATE).getInt("tolerance",0));g.setOnCheckedChangeListener((group,id)->getSharedPreferences("prefs",MODE_PRIVATE).edit().putInt("tolerance",id-100).apply());l.addView(g);
@@ -53,6 +60,39 @@ public class MainActivity extends Activity {
  SeekBar volume=new SeekBar(this);volume.setMax(75);volume.setProgress(prefs.getInt("alert_volume",100)-25);l.addView(volume);
  volume.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onStartTrackingTouch(SeekBar b){}public void onStopTrackingTouch(SeekBar b){}public void onProgressChanged(SeekBar b,int value,boolean fromUser){int percent=value+25;vol.setText("Alert volume: "+percent+"% of system volume");if(fromUser)prefs.edit().putInt("alert_volume",percent).apply();}});
 
+ }
+ private void testVoiceNow(){
+  final int token=++voiceTestGeneration;
+  if(testVoice!=null){testVoice.stop();testVoice.shutdown();testVoice=null;}
+  State.voiceDiagnostic="Initialising test voice";
+  testVoice=new TextToSpeech(this,init->h.post(()->{
+   if(token!=voiceTestGeneration||isFinishing()||isDestroyed())return;
+   TextToSpeech voice=testVoice;
+   if(init!=TextToSpeech.SUCCESS||voice==null){State.voiceDiagnostic="Test voice initialisation failed; check Android TTS engine";return;}
+   int language=voice.setLanguage(Locale.UK);
+   if(language<TextToSpeech.LANG_AVAILABLE)language=voice.setLanguage(Locale.US);
+   if(language<TextToSpeech.LANG_AVAILABLE)language=voice.setLanguage(Locale.ENGLISH);
+   if(language<TextToSpeech.LANG_AVAILABLE){State.voiceDiagnostic="English language data missing; check Android TTS settings";return;}
+   voice.setAudioAttributes(new AudioAttributes.Builder()
+       .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+       .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build());
+   voice.setOnUtteranceProgressListener(new UtteranceProgressListener(){
+    @Override public void onStart(String id){h.post(()->{if(token==voiceTestGeneration)State.voiceDiagnostic="Test voice started output";});}
+    @Override public void onDone(String id){h.post(()->{if(token==voiceTestGeneration)State.voiceDiagnostic="Test voice completed; did you hear it?";});}
+    @Override public void onError(String id){h.post(()->{if(token==voiceTestGeneration)State.voiceDiagnostic="Test voice playback error";});}
+    @Override public void onError(String id,int error){h.post(()->{if(token==voiceTestGeneration)State.voiceDiagnostic="Test voice error code "+error;});}
+   });
+   int result=voice.speak("SpeedVoice audio test. Speed limit fifty kilometres per hour.",TextToSpeech.QUEUE_FLUSH,null,"test-"+token);
+   State.voiceDiagnostic=result==TextToSpeech.SUCCESS?"Test voice queued; listen for speech":"Test voice request rejected";
+  }));
+ }
+ private void testBeep(){
+  try{
+   ToneGenerator tone=new ToneGenerator(AudioManager.STREAM_MUSIC,90);
+   tone.startTone(ToneGenerator.TONE_PROP_BEEP,450);
+   h.postDelayed(tone::release,700);
+   Toast.makeText(this,"Beep sent to media audio output",Toast.LENGTH_SHORT).show();
+  }catch(RuntimeException e){Toast.makeText(this,"Unable to play test beep",Toast.LENGTH_LONG).show();}
  }
  private void chooseCar(){
   if(checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT)!=PackageManager.PERMISSION_GRANTED){requestPermissions(new String[]{Manifest.permission.BLUETOOTH_CONNECT},23);return;}
@@ -80,5 +120,5 @@ public class MainActivity extends Activity {
  @Override public void onRequestPermissionsResult(int code,String[] perms,int[] result){super.onRequestPermissionsResult(code,perms,result);if(code==10&&checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)==PackageManager.PERMISSION_GRANTED)startMonitor();else if(code==11)launch();else if((code==23||code==24)&&result.length>0&&result[0]==PackageManager.PERMISSION_GRANTED)chooseCar();}
  @Override protected void onResume(){super.onResume();h.removeCallbacks(refresh);h.post(refresh);}
  @Override protected void onPause(){h.removeCallbacks(refresh);super.onPause();}
- @Override protected void onDestroy(){if(testVoice!=null)testVoice.shutdown();super.onDestroy();}
+ @Override protected void onDestroy(){voiceTestGeneration++;if(testVoice!=null)testVoice.shutdown();super.onDestroy();}
 }
