@@ -6,8 +6,8 @@ android {
  applicationId 'ie.speedvoice'
  minSdk 34
  targetSdk 35
- versionCode 11
- versionName '0.8-phone'
+ versionCode 12
+ versionName '0.8.1-reliability'
  }
  compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
