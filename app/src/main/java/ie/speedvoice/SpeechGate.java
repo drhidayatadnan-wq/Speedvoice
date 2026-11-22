@@ -27,7 +27,7 @@ final class SpeechGate {
  private final TextToSpeech tts;
  private final Handler h;
  private final AudioAttributes attrs=new AudioAttributes.Builder()
-  .setUsage(AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
+  .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
   .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build();
  private final AudioFocusRequest focus;
  private boolean closed=false,holding=false;
@@ -48,10 +48,11 @@ final class SpeechGate {
    .setOnAudioFocusChangeListener(change->{if(change<0){interrupt(true);quietSince=-1;retryAfter=SystemClock.elapsedRealtime()+1000;}},h)
    .build();
   tts.setOnUtteranceProgressListener(new UtteranceProgressListener(){
-   @Override public void onStart(String id){}
-   @Override public void onDone(String id){h.post(()->finished(id));}
-   @Override public void onError(String id){h.post(()->finished(id));}
-   @Override public void onStop(String id,boolean interrupted){h.post(()->finished(id));}
+   @Override public void onStart(String id){h.post(()->{if(id.equals(activeId))State.voiceDiagnostic="Speech engine started output (navigation audio)";});}
+   @Override public void onDone(String id){h.post(()->{if(id.equals(activeId))State.voiceDiagnostic="Speech engine completed utterance";finished(id);});}
+   @Override public void onError(String id){h.post(()->{if(id.equals(activeId))State.voiceDiagnostic="TTS playback error";finished(id);});}
+   @Override public void onError(String id,int errorCode){h.post(()->{if(id.equals(activeId))State.voiceDiagnostic="TTS error code "+errorCode;finished(id);});}
+   @Override public void onStop(String id,boolean interrupted){h.post(()->{if(id.equals(activeId))State.voiceDiagnostic="TTS stopped";finished(id);});}
   });
   h.post(poll);
  }
@@ -64,7 +65,7 @@ final class SpeechGate {
  void offerDynamic(Supplier<String> text,int priority,BooleanSupplier valid,IntSupplier excess){
   if(closed)return;
   Item item=new Item(text,priority,valid,excess);
-  if(pending==null||!pending.usable(SystemClock.elapsedRealtime())||priority>=pending.priority)pending=item;
+  if(pending==null||!pending.usable(SystemClock.elapsedRealtime())||priority>=pending.priority){pending=item;State.voiceDiagnostic="Alert queued for speech";}
  }
  private boolean otherSpeech(){
   if(audio==null)return true;
@@ -73,24 +74,27 @@ final class SpeechGate {
    for(AudioPlaybackConfiguration p:audio.getActivePlaybackConfigurations()){
     AudioAttributes a=p.getAudioAttributes();if(a==null)continue;
     int usage=a.getUsage(),content=a.getContentType();
-    if(usage==AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE||
-       usage==AudioAttributes.USAGE_VOICE_COMMUNICATION||
-       (content==AudioAttributes.CONTENT_TYPE_SPEECH&&
-        !(active!=null&&usage==AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)))return true;
+    if(usage==AudioAttributes.USAGE_VOICE_COMMUNICATION)return true;
+    // During our own utterance the navigation stream is active as well.
+    // Treat it as external speech only before dispatch; audio focus handles interruption.
+    if(usage==AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE&&active==null)return true;
+    if(content==AudioAttributes.CONTENT_TYPE_SPEECH&&
+       !(active!=null&&(usage==AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE||
+                         usage==AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)))return true;
    }
    return false;
   }catch(RuntimeException e){return true;}
  }
  private void tick(){
   long now=SystemClock.elapsedRealtime();
-  if(pending!=null&&!pending.usable(now))pending=null;
+  if(pending!=null&&!pending.usable(now)){pending=null;State.voiceDiagnostic="Alert expired or recognition no longer valid";}
   if(active!=null&&!active.usable(now)){interrupt(false);}
   if(active!=null&&now-started>10000){interrupt(false);}
   if(pending==null&&active==null){quietSince=-1;return;}
-  if(otherSpeech()){quietSince=-1;if(active!=null)interrupt(true);return;}
+  if(otherSpeech()){quietSince=-1;State.voiceDiagnostic="Waiting for other speech/navigation audio";if(active!=null)interrupt(true);return;}
   if(quietSince<0)quietSince=now;
   if(active!=null||pending==null||now<retryAfter||now-quietSince<QUIET_MS)return;
-  if(audio.requestAudioFocus(focus)!=AudioManager.AUDIOFOCUS_REQUEST_GRANTED){retryAfter=now+1000;quietSince=-1;return;}
+  if(audio.requestAudioFocus(focus)!=AudioManager.AUDIOFOCUS_REQUEST_GRANTED){State.voiceDiagnostic="Audio focus denied; retrying";retryAfter=now+1000;quietSince=-1;return;}
   holding=true;
   if(otherSpeech()||!pending.usable(now)){releaseFocus();quietSince=-1;return;}
   active=pending;pending=null;activeId="speedvoice-gate-"+(++seq);started=now;
@@ -117,9 +121,10 @@ final class SpeechGate {
  private void speakActive(){
   if(active==null)return;
   String text=active.text.get();
-  if(text==null||text.isEmpty()){interrupt(false);return;}
+  if(text==null||text.isEmpty()){State.voiceDiagnostic="Alert no longer applicable";interrupt(false);return;}
   Bundle params=new Bundle();params.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME,volume());
-  if(tts.speak(text,TextToSpeech.QUEUE_FLUSH,params,activeId)!=TextToSpeech.SUCCESS)interrupt(false);
+  int queued=tts.speak(text,TextToSpeech.QUEUE_FLUSH,params,activeId);
+  if(queued!=TextToSpeech.SUCCESS){State.voiceDiagnostic="TTS rejected speech request";interrupt(false);}else State.voiceDiagnostic="TTS speech request accepted";
  }
  private boolean startTone(int count){
   stopTone();
@@ -131,7 +136,7 @@ final class SpeechGate {
   }
   try{
    tone=new AudioTrack.Builder()
-    .setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
+    .setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
     .setAudioFormat(new AudioFormat.Builder().setSampleRate(rate).setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
     .setTransferMode(AudioTrack.MODE_STATIC).setBufferSizeInBytes(pcm.length*2).build();
    if(tone.getState()!=AudioTrack.STATE_INITIALIZED||tone.write(pcm,0,pcm.length)!=pcm.length){stopTone();return false;}
