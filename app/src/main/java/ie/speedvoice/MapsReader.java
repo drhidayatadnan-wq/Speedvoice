@@ -17,7 +17,7 @@ public class MapsReader extends AccessibilityService {
  private String captureIssue="";
  private long visualAt=0;
  private int visualValue=-1,visualWindow=-1,generation=0;
- private boolean alive=true,ready=false,everHadLimit=false,lostSpoken=false;
+ private boolean alive=true,ready=false,everHadLimit=false,lostSpoken=false,sessionAnnounced=false;
  private int candidate=-1,confirmed=-1,count=0;
  private boolean warned=false;
  private long belowSince=-1;
@@ -99,7 +99,14 @@ public class MapsReader extends AccessibilityService {
  private void read(CharSequence text,Set<Integer> found){if(text!=null){int x=LimitParser.parse(text.toString());if(x>0)found.add(x);}}
  private void tick(){
  if(busy&&SystemClock.elapsedRealtime()-captureStarted>5000){clearVisual();captureIssue="OCR timed out; retrying";}
- if(!State.running||!Consent.accepted(MapsReader.this)){State.readerDiagnostic="Inactive";if(gate!=null)gate.cancel();clearVisual();invalidate();everHadLimit=lostSpoken=false;missingSince=-1;return;}
+ if(!State.running||!Consent.accepted(MapsReader.this)){sessionAnnounced=false;State.readerDiagnostic="Inactive";if(gate!=null)gate.cancel();clearVisual();invalidate();everHadLimit=lostSpoken=false;missingSince=-1;return;}
+ if(!sessionAnnounced&&ready&&gate!=null&&activeMapsWindow()>=0&&!State.muted){
+  // A single acknowledgement verifies that the enabled reader and voice path are active,
+  // even if the Maps speed limit itself is not readable.
+  gate.offer("SpeedVoice monitoring active. Announcements require a readable speed limit in Google Maps.",0,
+   ()->alive&&State.running&&Consent.accepted(MapsReader.this)&&!State.muted&&activeMapsWindow()>=0);
+  sessionAnnounced=true;
+ }
  long now=SystemClock.elapsedRealtime();int value=readLimit();
  if(value<0){invalidate();State.status="No readable speed limit — use visible portrait Maps navigation";if(missingSince<0)missingSince=now;if(everHadLimit&&!lostSpoken&&now-missingSince>=3000){speak("Speed limit unavailable. Check road signs.");lostSpoken=true;}return;}
  missingSince=-1;lostSpoken=false;
