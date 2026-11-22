@@ -46,3 +46,6 @@ Live monitoring and the app's accessibility setup shortcut require affirmative a
 
 ## v0.8 phone (experimental)
 Based on known-working v0.7.2. Corrects v0.7.3 callback context compile error and retains the disclosure. Optional car Bluetooth connection reminder uses an explicitly selected paired device and opens the app; the user starts GPS while parked (no unattended background launch or automatic stop). Graded mode uses one beep under 5 km/h above detected limit, two at 5–14, three at 15 or more, subject to configured alert threshold. Optional return-to-detected-limit voice requires sustained reliable speed at/below same limit after warning queued. Reader diagnostics identify source or failure. No Waze or Android Auto support, no journey recording. Test indoors first.
+
+## v0.8.1 reliability test
+Separate experimental repair branch based on v0.8: prevents obsolete screenshot/OCR callbacks from corrupting later captures, retries if OCR stalls, handles null active window package data, and surfaces screenshot/OCR failure diagnostics on the main screen. The known-working v0.7.2 and v0.8 branches are not changed. This is a code-level correction; its Android build and live screen recognition still require validation before use. Never rely on this prototype for driving decisions.
