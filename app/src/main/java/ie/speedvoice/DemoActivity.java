@@ -51,10 +51,21 @@ public class DemoActivity extends Activity {
  button(l,"Repeat speed limit announcement",v->speak("Speed limit "+limit+" kilometres per hour."));
  button(l,"Exit demo",v->finish());
  render();
- voice=new TextToSpeech(this,result->{if(isFinishing()||isDestroyed()||voice==null)return;if(result==TextToSpeech.SUCCESS){ready=voice.setLanguage(Locale.UK)>=TextToSpeech.LANG_AVAILABLE;if(ready)gate=new SpeechGate(this,voice,h);}voiceStatus.setText(ready?"Voice ready • Alerts after 3 seconds, repeat at the selected interval.":"Voice unavailable — check Android text-to-speech settings.");if(ready&&active)speak("Speed limit "+limit+" kilometres per hour.");});
+ voice=new TextToSpeech(this,result->h.post(()->{
+  if(isFinishing()||isDestroyed()||voice==null)return;
+  if(result==TextToSpeech.SUCCESS){
+   int language=voice.setLanguage(Locale.UK);
+   if(language<TextToSpeech.LANG_AVAILABLE)language=voice.setLanguage(Locale.US);
+   if(language<TextToSpeech.LANG_AVAILABLE)language=voice.setLanguage(Locale.ENGLISH);
+   ready=language>=TextToSpeech.LANG_AVAILABLE;
+   if(ready)gate=new SpeechGate(this,voice,h);
+  }
+  voiceStatus.setText(ready?"Voice ready; alerts after 3 seconds":"TTS unavailable; test voice on main screen and check Android settings");
+  if(ready&&active)speak("Speed limit "+limit+" kilometres per hour.");
+ }));
  }
  private void resetWarning(){overSince=lastWarn=belowSince=-1;warned=false;}
- private void render(){if(sign==null||speedText==null||message==null)return;boolean over=speed>limit+tolerance;sign.setText(""+limit);speedText.setText(speed+" km/h");speedText.setTextColor(over?Color.rgb(192,32,32):Color.rgb(30,125,65));message.setText(over?(lastWarn<0?"Simulated overspeed — warning after 3 seconds":"Simulated overspeed — slow down"):"Within selected warning threshold");}
+ private void render(){if(voiceStatus!=null&&ready)voiceStatus.setText("Voice: "+State.voiceDiagnostic);if(sign==null||speedText==null||message==null)return;boolean over=speed>limit+tolerance;sign.setText(""+limit);speedText.setText(speed+" km/h");speedText.setTextColor(over?Color.rgb(192,32,32):Color.rgb(30,125,65));message.setText(over?(lastWarn<0?"Simulated overspeed — warning after 3 seconds":"Simulated overspeed — slow down"):"Within selected warning threshold");}
  private void evaluate(){if(!active){render();return;}long now=SystemClock.elapsedRealtime();if(speed>limit+tolerance){belowSince=-1;if(overSince<0)overSince=now;if(now-overSince>=3000&&(lastWarn<0||now-lastWarn>=1000L*getSharedPreferences("prefs",MODE_PRIVATE).getInt("alert_interval",10))){lastWarn=now;warned=true;speak("Warning. Speed limit "+limit+". Please slow down.");}}else{overSince=lastWarn=-1;if(warned&&speed<=limit){if(belowSince<0)belowSince=now;if(now-belowSince>=2000){warned=false;belowSince=-1;if(getSharedPreferences("prefs",MODE_PRIVATE).getBoolean("recovery_voice",true))speak("Back within the detected speed limit.");}}else belowSince=-1;}render();}
  private void speak(String s){
  if(!active)return;
