@@ -22,7 +22,7 @@ public class MainActivity extends Activity {
  private final Runnable refresh=new Runnable(){public void run(){float s=State.freshSpeed();status.setText(State.status+"\nSpeed: "+(Float.isNaN(s)?"Unavailable":Math.round(s)+" km/h")+"\nLimit: "+(State.limit<0?"Unavailable":State.limit+" km/h")+"\nReader: "+State.readerDiagnostic);h.postDelayed(this,1000);}};
  @Override public void onCreate(Bundle b){super.onCreate(b);
  ScrollView sc=new ScrollView(this);LinearLayout l=new LinearLayout(this);l.setOrientation(LinearLayout.VERTICAL);int p=(int)(24*getResources().getDisplayMetrics().density);l.setPadding(p,p,p,p);sc.addView(l);setContentView(sc);
- TextView title=new TextView(this);title.setText("SpeedVoice v0.8");title.setTextSize(32);l.addView(title);
+ TextView title=new TextView(this);title.setText("SpeedVoice v0.8.1");title.setTextSize(32);l.addView(title);
  TextView intro=new TextView(this);intro.setText("Experimental • Ireland / km/h\nReads visible Google Maps labels or attempts local recognition of red circular signs. If recognition fails, alerts stop. GPS and map data may be wrong. Use road signs and your vehicle speedometer. Set up parked. No screenshots saved or transmitted.");l.addView(intro);
  status=new TextView(this);status.setTextSize(20);status.setPadding(0,p,0,p);l.addView(status);
  add(l,"Demo mode — test indoors",v->{stopService(new Intent(this,GpsService.class));startActivity(new Intent(this,DemoActivity.class));});
