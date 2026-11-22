@@ -13,6 +13,8 @@ public class MapsReader extends AccessibilityService {
  private SpeechGate gate;
  private VisualReader visual;
  private boolean busy=false;
+ private long captureStarted=0;
+ private String captureIssue="";
  private long visualAt=0;
  private int visualValue=-1,visualWindow=-1,generation=0;
  private boolean alive=true,ready=false,everHadLimit=false,lostSpoken=false;
@@ -44,29 +46,37 @@ public class MapsReader extends AccessibilityService {
  },()->Math.max(0,(int)Math.floor(State.freshSpeed()-limit)));
  }
  private void invalidate(){warned=false;belowSince=-1;confirmed=candidate=-1;count=0;lastObservation=-1;State.limit=-1;overSince=-1;lastWarn=-100000;}
- private void clearVisual(){visualAt=0;visualValue=-1;visualWindow=-1;generation++;}
- private int activeMapsWindow(){AccessibilityNodeInfo root=getRootInActiveWindow();if(root==null)return -1;try{return "com.google.android.apps.maps".contentEquals(root.getPackageName())?root.getWindowId():-1;}finally{root.recycle();}}
+ private void clearVisual(){visualAt=0;visualValue=-1;visualWindow=-1;generation++;busy=false;}
+ private int activeMapsWindow(){AccessibilityNodeInfo root=getRootInActiveWindow();if(root==null)return -1;try{return root.getPackageName()!=null&&"com.google.android.apps.maps".contentEquals(root.getPackageName())?root.getWindowId():-1;}finally{root.recycle();}}
  private int readLimit(){
  AccessibilityNodeInfo root=getRootInActiveWindow();if(root==null){State.readerDiagnostic="No active window";clearVisual();return -1;}int window;
- try{if(!"com.google.android.apps.maps".contentEquals(root.getPackageName())){State.readerDiagnostic="Google Maps not visible";clearVisual();return -1;}
+ try{if(root.getPackageName()==null||!"com.google.android.apps.maps".contentEquals(root.getPackageName())){State.readerDiagnostic="Google Maps not visible";clearVisual();return -1;}
  window=root.getWindowId();Set<Integer> found=new HashSet<>();walk(root,found,new int[]{0});
  if(found.size()==1){State.readerDiagnostic="Accessibility label";clearVisual();observation=SystemClock.elapsedRealtime();return found.iterator().next();}
  if(found.size()>1){State.readerDiagnostic="Conflicting speed-limit labels";clearVisual();return -1;}
  }finally{root.recycle();}
  if(visualWindow!=window){clearVisual();visualWindow=window;}
  if(!busy&&visual!=null&&alive)capture(window);
- observation=visualAt;int result=SystemClock.elapsedRealtime()-visualAt<=2200?visualValue:-1;State.readerDiagnostic=result>0?"Local OCR sign":"Waiting for readable sign (OCR)";return result;
+ observation=visualAt;int result=SystemClock.elapsedRealtime()-visualAt<=2200?visualValue:-1;State.readerDiagnostic=result>0?"Local OCR sign":(captureIssue.isEmpty()?"Waiting for readable sign (OCR)":captureIssue);return result;
  }
  private void capture(int window){
- busy=true;final int token=generation;final long started=SystemClock.elapsedRealtime();
+ busy=true;final int token=generation;final long started=SystemClock.elapsedRealtime();captureStarted=started;
  try{takeScreenshotOfWindow(window,getMainExecutor(),new TakeScreenshotCallback(){
  @Override public void onSuccess(ScreenshotResult shot){Bitmap copy=null;HardwareBuffer buffer=shot.getHardwareBuffer();
  try{if(alive&&State.running&&Consent.accepted(MapsReader.this)&&token==generation&&activeMapsWindow()==window){Bitmap hw=Bitmap.wrapHardwareBuffer(buffer,shot.getColorSpace());if(hw!=null){try{copy=hw.copy(Bitmap.Config.ARGB_8888,false);}finally{hw.recycle();}}}}catch(RuntimeException ignored){}finally{buffer.close();}
- if(copy==null){busy=false;visualAt=0;visualValue=-1;return;}
- visual.scan(copy,value->{busy=false;if(alive&&State.running&&Consent.accepted(MapsReader.this)&&token==generation&&activeMapsWindow()==window&&SystemClock.elapsedRealtime()-started<=1800){visualValue=value;visualAt=started;}else{visualAt=0;visualValue=-1;}});
+ if(copy==null){if(token==generation){busy=false;visualAt=0;visualValue=-1;captureIssue="Screenshot unavailable or Maps obscured";}return;}
+ visual.scan(copy,value->{
+  // Discard a delayed callback if a newer window/capture has superseded it.
+  if(token!=generation)return;
+  busy=false;
+  if(alive&&State.running&&Consent.accepted(MapsReader.this)&&activeMapsWindow()==window&&SystemClock.elapsedRealtime()-started<=1800){
+   visualValue=value;visualAt=started;
+   captureIssue=value>0?"":"OCR found no qualifying speed-limit sign";
+  }else{visualAt=0;visualValue=-1;captureIssue="Maps changed or OCR response expired";}
+ });
  }
- @Override public void onFailure(int errorCode){busy=false;visualAt=0;visualValue=-1;}
- });}catch(RuntimeException e){busy=false;visualAt=0;visualValue=-1;}
+ @Override public void onFailure(int errorCode){if(token==generation){busy=false;visualAt=0;visualValue=-1;captureIssue="Screenshot failure (code "+errorCode+")";}}
+ });}catch(RuntimeException e){if(token==generation){busy=false;visualAt=0;visualValue=-1;captureIssue="Screenshot request unavailable";}}
  }
  private void walk(AccessibilityNodeInfo n,Set<Integer> found,int[] seen){
  if(++seen[0]>600)return;if(n.isVisibleToUser()){read(n.getText(),found);read(n.getContentDescription(),found);}
@@ -74,6 +84,7 @@ public class MapsReader extends AccessibilityService {
  }
  private void read(CharSequence text,Set<Integer> found){if(text!=null){int x=LimitParser.parse(text.toString());if(x>0)found.add(x);}}
  private void tick(){
+ if(busy&&SystemClock.elapsedRealtime()-captureStarted>5000){clearVisual();captureIssue="OCR timed out; retrying";}
  if(!State.running||!Consent.accepted(MapsReader.this)){State.readerDiagnostic="Inactive";if(gate!=null)gate.cancel();clearVisual();invalidate();everHadLimit=lostSpoken=false;missingSince=-1;return;}
  long now=SystemClock.elapsedRealtime();int value=readLimit();
  if(value<0){invalidate();State.status="No readable speed limit — use visible portrait Maps navigation";if(missingSince<0)missingSince=now;if(everHadLimit&&!lostSpoken&&now-missingSince>=3000){speak("Speed limit unavailable. Check road signs.");lostSpoken=true;}return;}
