@@ -1,7 +1,7 @@
 name: Build debug APK
 on: [workflow_dispatch, push]
 permissions:
-  contents: read
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -27,3 +27,21 @@ jobs:
           name: SpeedVoice-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+      - name: Publish experimental debug APK as prerelease
+        if: ${{ github.ref == 'refs/heads/v0.8.2-speech-diagnostics' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="v0.8.2-speech-diagnostics"
+          cp app/build/outputs/apk/debug/app-debug.apk SpeedVoice-v0.8.2-debug.apk
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" SpeedVoice-v0.8.2-debug.apk --clobber
+          else
+            gh release create "$TAG" SpeedVoice-v0.8.2-debug.apk --prerelease \
+              --title "SpeedVoice v0.8.2 — experimental debug APK" \
+              --notes "Experimental test build, not verified for real-world driving. Do not rely on speed-limit or overspeed announcements; follow road signs and the vehicle speedometer. Test only while safely parked. Debug builds may require removing older differently signed APKs."
+          fi
