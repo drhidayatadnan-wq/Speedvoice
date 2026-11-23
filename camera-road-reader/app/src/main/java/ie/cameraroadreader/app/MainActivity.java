@@ -35,6 +35,9 @@ public class MainActivity extends AppCompatActivity {
   private boolean voice=true, speechReady=false, showLanes=true;
   private String latestRoadSign="", checkingRoadSign="", lastSpokenRoadSign="";
   private long lastFamilyCheck=0,lastFamilySeen=0;
+  private String checkingFamily="",confirmedFamily="";
+  private int familyHits=0;
+  private long familyCandidateAt=0,confirmedFamilyAt=0;
   private int roadSignHits=0;
   private long roadSignAt=0, checkingRoadSignAt=0, lastSpokenRoadSignAt=0;
   private int candidate=-1, confirmations=0, announced=-1, confirmed=-1;
@@ -150,18 +153,10 @@ public class MainActivity extends AppCompatActivity {
   }
   private void recognise(Text result,Bitmap image){
     long now=SystemClock.elapsedRealtime();
-    if(now-lastFamilyCheck>1050){
+    if(now-lastFamilyCheck>900){
       lastFamilyCheck=now;
       RoadVision.SignGuess family=RoadVision.possibleIrishWarningFamily(image);
-      if(family!=null){
-        lastFamilySeen=now;
-        String name=family.label.equals("WARNING DIAMOND")
-          ?"POSSIBLE YELLOW WARNING SIGN — symbol unknown"
-          :"POSSIBLE ORANGE ROADWORKS SIGN — symbol unknown";
-        familyStatus.setText(name);
-      }else if(now-lastFamilySeen>5000){
-        familyStatus.setText("RSA WARNING SIGN FAMILIES: scanning…");
-      }
+      updateFamily(family,now,image.getWidth(),image.getHeight());
     }
     RoadVision.LaneEstimate lane=RoadVision.lanes(image);
     if(showLanes){
@@ -174,8 +169,10 @@ public class MainActivity extends AppCompatActivity {
     Rect bestRect=null;
     int biggest=0;
     for(Text.TextBlock block:result.getTextBlocks()){
+      String blockSign=identifyRoadSign(block.getText(),block.getBoundingBox(),image);
+      if(blockSign!=null){roadSign=blockSign;roadSignBounds=block.getBoundingBox();}
       for(Text.Line line:block.getLines()){
-        String sign=identifyRoadSign(line,image);
+        String sign=identifyRoadSign(line.getText(),line.getBoundingBox(),image);
         if(sign!=null && (roadSign==null || "STOP".equals(sign))){
           roadSign=sign;
           roadSignBounds=line.getBoundingBox();
@@ -228,16 +225,21 @@ public class MainActivity extends AppCompatActivity {
     }
     updateStatus(now);
   }
-  private String identifyRoadSign(Text.Line line,Bitmap image){
-    String text=java.text.Normalizer.normalize(line.getText(),java.text.Normalizer.Form.NFD)
+  private String identifyRoadSign(String raw,Rect rect,Bitmap image){
+    if(raw==null)return null;
+    String text=java.text.Normalizer.normalize(raw,java.text.Normalizer.Form.NFD)
       .replaceAll("\\p{M}+","").toUpperCase(Locale.ROOT)
       .replaceAll("[^A-Z ]"," ").replaceAll(" +"," ").trim();
     if(text.isEmpty())return null;
-    Rect rect=line.getBoundingBox();
     if(text.matches(".*\\bSTOP\\b.*") && redNear(image,rect))return "STOP";
     if((text.contains("YIELD") || text.contains("GEILL SLI")
         || text.contains("GEILL")) && redNear(image,rect))return "YIELD";
     if(text.contains("NO ENTRY"))return "NO ENTRY";
+    if(text.contains("NO RIGHT TURN"))return "NO RIGHT TURN";
+    if(text.contains("NO LEFT TURN"))return "NO LEFT TURN";
+    if(text.contains("NO U TURN"))return "NO U TURN";
+    if(text.contains("ROAD CLOSED") || text.contains("BOTHAR DUNTA"))return "ROAD CLOSED";
+    if(text.contains("DETOUR") || text.contains("DIVERSION") || text.contains("TIMPILL"))return "DIVERSION";
     if(text.contains("BUS LANE"))return "BUS LANE";
     if(text.contains("CYCLE LANE") || text.contains("CYCLE TRACK"))return "CYCLE LANE";
     if(text.contains("ONE WAY"))return "ONE WAY";
@@ -245,14 +247,62 @@ public class MainActivity extends AppCompatActivity {
     if(text.contains("KEEP RIGHT"))return "KEEP RIGHT";
     if(text.contains("ROADWORKS") || text.contains("ROAD WORKS"))return "ROADWORKS";
     if(text.contains("ROAD MARKINGS"))return "ROAD MARKINGS";
-    if(text.contains("END OF DETOUR"))return "END OF DETOUR";
-    if(text.contains("TEMPORARY TRAFFIC"))return "TEMPORARY TRAFFIC SIGNALS";
+    if(text.contains("END OF DETOUR") || text.contains("DEIREADH AN TIMPILL"))return "END OF DETOUR";
+    if(text.contains("TEMPORARY TRAFFIC") || text.contains("TEMPORARY SIGNALS"))return "TEMPORARY TRAFFIC SIGNALS";
+    if(text.contains("LANE CLOSED") || text.contains("LANE CLOSURE"))return "LANE CLOSED";
+    if(text.contains("NEW ROAD LAYOUT"))return "NEW ROAD LAYOUT";
+    if(text.contains("FLAGMAN") || text.contains("FLAGGER"))return "FLAGMAN AHEAD";
     if(text.contains("SLOW") || text.contains("GO MALL"))return "SLOW";
+    if(text.matches("GO") || text.matches("TEIGH")){
+      if(greenNear(image,rect))return "ROADWORKS GO";
+    }
     if(text.contains("CONCEALED ENTRANCE"))return "CONCEALED ENTRANCE";
     if(text.contains("PEDESTRIAN CROSSING"))return "PEDESTRIAN CROSSING";
     if(text.contains("NO OVERTAKING"))return "NO OVERTAKING";
     if(text.matches(".*\\bSCHOOL\\b.*"))return "SCHOOL";
     return null;
+  }
+  private boolean greenNear(Bitmap image,Rect rect){
+    if(rect==null)return false;
+    int pad=Math.max(12,rect.height());
+    int x0=Math.max(0,rect.left-pad),x1=Math.min(image.getWidth()-1,rect.right+pad);
+    int y0=Math.max(0,rect.top-pad),y1=Math.min(image.getHeight()-1,rect.bottom+pad);
+    if(x1<=x0||y1<=y0)return false;
+    int count=0;
+    for(int y=y0;y<=y1;y+=Math.max(2,(y1-y0)/12)){
+      for(int x=x0;x<=x1;x+=Math.max(2,(x1-x0)/12)){
+        int p=image.getPixel(x,y),g=Color.green(p);
+        if(g>105 && g>Color.red(p)*1.25f && g>Color.blue(p)*1.20f)count++;
+      }
+    }
+    return count>=12;
+  }
+  private void updateFamily(RoadVision.SignGuess family,long now,int w,int h){
+    if(family!=null){
+      lastFamilySeen=now;
+      marker.markWarningFamily(family.rect,w,h,family.label);
+      if(!family.label.equals(checkingFamily) || now-familyCandidateAt>2400){
+        checkingFamily=family.label;
+        familyHits=1;
+      }else familyHits++;
+      familyCandidateAt=now;
+      if(familyHits>=2){
+        confirmedFamily=family.label;
+        confirmedFamilyAt=now;
+        checkingFamily="";
+        familyHits=0;
+      }
+    } else if(now-familyCandidateAt>2500) {
+      checkingFamily="";
+      familyHits=0;
+    }
+    if(!checkingFamily.isEmpty()){
+      familyStatus.setText("CHECKING: "+checkingFamily+" (symbol unknown)");
+    }else if(!confirmedFamily.isEmpty() && now-confirmedFamilyAt<12000){
+      familyStatus.setText("POSSIBLE RSA SIGN: "+confirmedFamily+" (symbol unknown)");
+    }else if(now-lastFamilySeen>5000){
+      familyStatus.setText("IRISH WARNING / ROADWORKS SIGNS: scanning…");
+    }
   }
   private boolean redNear(Bitmap image,Rect rect){
     if(rect==null)return false;
@@ -325,13 +375,15 @@ public class MainActivity extends AppCompatActivity {
   }
   private class SignOverlay extends View{
     private final Paint outline=new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint familyPaint=new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint roadPaint=new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint lanePaint=new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint textPaint=new Paint(Paint.ANTI_ALIAS_FLAG);
-    private Rect speedBox,roadBox;
+    private Rect speedBox,roadBox,familyBox;
+    private String familyLabel="";
     private String roadLabel="";
     private int imgW,imgH,detectedLimit;
-    private long speedMarkedAt=0,roadMarkedAt=0,laneMarkedAt=0;
+    private long speedMarkedAt=0,roadMarkedAt=0,laneMarkedAt=0,familyMarkedAt=0;
     private boolean lanesEnabled=true;
     private RoadVision.LaneEstimate laneEstimate;
     SignOverlay(){
@@ -343,6 +395,9 @@ public class MainActivity extends AppCompatActivity {
       roadPaint.setColor(0xffffd36e);
       roadPaint.setStyle(Paint.Style.STROKE);
       roadPaint.setStrokeWidth(dp(3));
+      familyPaint.setColor(0xffffab52);
+      familyPaint.setStyle(Paint.Style.STROKE);
+      familyPaint.setStrokeWidth(dp(3));
       lanePaint.setColor(0xff5ce8ff);
       lanePaint.setStyle(Paint.Style.STROKE);
       lanePaint.setStrokeWidth(dp(3));
@@ -351,6 +406,13 @@ public class MainActivity extends AppCompatActivity {
       textPaint.setTypeface(Typeface.DEFAULT_BOLD);
       textPaint.setTextSize(dp(15));
       textPaint.setShadowLayer(dp(2),0,0,0xff000000);
+    }
+    void markWarningFamily(Rect box,int width,int height,String family){
+      familyBox=new Rect(box);
+      familyLabel=family;
+      imgW=width;imgH=height;
+      familyMarkedAt=SystemClock.elapsedRealtime();
+      invalidate();postInvalidateDelayed(1500);
     }
     void enableLanes(boolean enabled){lanesEnabled=enabled;invalidate();}
     void markLanes(RoadVision.LaneEstimate estimate) {
@@ -401,6 +463,14 @@ public class MainActivity extends AppCompatActivity {
         textPaint.setColor(0xff75edb9);
         c.drawText("CHECK "+detectedLimit,Math.max(dp(4),area.left),
           Math.max(dp(18),area.top-dp(5)),textPaint);
+      }
+      if(familyBox!=null && now-familyMarkedAt<1400){
+        RectF area=new RectF(familyBox.left*ratio+xoff,familyBox.top*ratio+yoff,
+            familyBox.right*ratio+xoff,familyBox.bottom*ratio+yoff);
+        c.drawRoundRect(area,dp(7),dp(7),familyPaint);
+        textPaint.setColor(0xffffab52);
+        c.drawText(familyLabel,Math.max(dp(4),area.left),
+            Math.max(dp(20),area.top-dp(7)),textPaint);
       }
       if(roadBox!=null && now-roadMarkedAt<1300){
         RectF area=new RectF(roadBox.left*ratio+xoff,roadBox.top*ratio+yoff,
