@@ -1,48 +1,53 @@
 package ie.cameraroadreader.app;
 
 /**
- * Road sign names selected from the Road Safety Authority Rules of the Road,
- * especially section 6. Status states actual prototype capability, not
- * whether the sign exists in Ireland.
- *
+ * RSA Rules of the Road, section 6, catalogued as descriptive names.
+ * The RSA sign graphics are not bundled. Detection capability is explicitly limited.
  * Source: https://www.rsa.ie/services/learner-drivers/resources/rules-of-the-road
+ * NOTE: An item on this list is NOT a guarantee it can be recognised by a phone camera.
  */
 final class IrishSignCatalog {
   private IrishSignCatalog() {}
   static String reference() {
-    return "BASED ON THE RSA RULES OF THE ROAD\n"
-      + "The list below is a reference. A sign being listed does NOT mean the phone can recognise its symbol.\n\n"
-      + "REGULATORY\n"
-      + "✓ Speed limit 20/30/40/50/60/80/100/120 — numeric OCR + red-ring check\n"
-      + "✓ STOP — text with red-colour check\n"
-      + "✓ YIELD / GÉILL SLÍ — text with red-colour check\n"
-      + "✓ No entry to vehicles — red disc with white bar (basic pattern check)\n"
-      + "◐ No entry — only if printed text is readable\n"
-      + "◐ One way / Keep left / Keep right — only if readable text is present\n"
-      + "○ Turn left / Turn right / Straight ahead — symbol-only detection not installed\n"
-      + "○ Parking prohibited / No U-turn / No overtaking — symbol-only detection not installed\n"
-      + "○ Alternate rural 60 km/h striped sign — not recognised\n\n"
-      + "WARNING SIGNS (YELLOW DIAMONDS)\n"
-      + "◐ Yellow warning sign category — experimental colour/shape check\n"
+    return "RSA RULES OF THE ROAD — IRISH SIGN REFERENCE\n"
+      + "Prototype status, not a certified sign classifier.\n"
+      + "✓ basic detector  ◐ partial or category only  ○ reference only\n\n"
+      + "REGULATORY SIGNS\n"
+      + "✓ 20 / 30 / 40 / 50 / 60 / 80 / 100 / 120 km/h: OCR plus red ring\n"
+      + "✓ STOP (red octagon or roadworks STOP): text plus red colour\n"
+      + "✓ YIELD / GÉILL SLÍ: text plus red colour\n"
+      + "✓ No entry to vehicles: red disc with white horizontal bar\n"
+      + "◐ No entry / one-way / keep left / keep right: OCR wording only\n"
+      + "◐ No left / right / U-turn: OCR wording only\n"
+      + "○ Turn left / right / straight ahead blue-circle symbols\n"
+      + "○ No overtaking, no parking, width / height / weight restrictions\n"
+      + "○ Alternate rural 60 km/h speed-limit sign with diagonal stripes\n\n"
+      + "WARNING SIGNS — YELLOW DIAMONDS\n"
+      + "◐ Yellow warning diamond: colour + coarse diamond shape only\n"
       + "○ Roundabout ahead\n"
-      + "○ Series of dangerous bends / dangerous corner\n"
-      + "○ School ahead (symbol)\n"
       + "○ Crossroads / T-junction\n"
-      + "○ Two-way traffic / pedestrian crossing ahead\n"
-      + "The exact black symbol is NOT recognised in this prototype.\n\n"
-      + "ROADWORKS (ORANGE DIAMONDS)\n"
-      + "◐ Orange roadworks sign category — experimental colour/shape check\n"
-      + "◐ Roadworks / Road markings / temporary traffic signals — only with readable text\n"
-      + "○ Roadworks ahead (worker symbol)\n"
-      + "○ Flagman ahead / temporary signals (symbol)\n"
-      + "○ Temporary lane closures and lane shifts (symbols)\n\n"
-      + "LANES AND ROAD MARKINGS\n"
-      + "◐ Possible white/yellow painted lines — experimental camera overlay\n"
-      + "○ Stop line / Yield line / centre line classification — not installed\n"
-      + "○ Motorway green arrow / red X lane controls — not installed\n"
-      + "○ Bus and cycle lane icons — not installed\n\n"
-      + "KEY: ✓ basic detection; ◐ partial or unverified category; ○ reference only.\n\n"
-      + "Visual alerts are NOT legal road-speed, road-sign, or lane guidance. "
-      + "Do not operate or look at the phone while driving.";
+      + "○ Dangerous bend or series of bends\n"
+      + "○ School ahead (children symbol)\n"
+      + "○ Two-way traffic, pedestrians, slippery road\n"
+      + "○ Chevron board: sharp change of direction\n"
+      + "Exact warning pictograms are NOT identified.\n\n"
+      + "ROADWORKS — ORANGE SIGNS\n"
+      + "◐ Orange roadworks diamond: colour + coarse diamond shape only\n"
+      + "◐ ROADWORKS, ROAD CLOSED, DETOUR / DIVERSION, END OF DETOUR\n"
+      + "◐ LANE CLOSED, NEW ROAD LAYOUT and TEMPORARY SIGNALS: OCR wording\n"
+      + "◐ ROADWORKS GO / TÉIGH: wording plus green colour\n"
+      + "○ Worker, flagman or temporary-signals pictograms\n"
+      + "○ Temporary lane-shift arrow pictograms\n\n"
+      + "INFORMATION AND LANE CONTROLS\n"
+      + "◐ BUS LANE, CYCLE TRACK: OCR wording only\n"
+      + "◐ White / yellow lane markings: approximate blue line overlay\n"
+      + "○ Motorway lane-open green arrow or closed red X\n"
+      + "○ Centre, STOP and YIELD road-line classifications\n"
+      + "○ Direction sign arrows and route-number interpretation\n\n"
+      + "Critical: sign / lane alerts may be missed or wrong.\n"
+      + "Never use this prototype to choose your lane, decide whether to stop, "
+      + "or override actual signs or traffic control.\n\n"
+      + "Source: RSA Rules of the Road, section 6\n"
+      + "rsa.ie/services/learner-drivers/resources/rules-of-the-road";
   }
 }
