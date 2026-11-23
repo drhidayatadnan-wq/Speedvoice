@@ -1,2 +1,2 @@
-# Camera Road Reader v0.1
-Public experimental Android app. Uses rear camera and on-device OCR to identify potential red-ring numeric speed signs; double-checks detections and beeps before text-to-speech. Not a legal road-speed authority. Never handle while driving.
+# Camera Road Reader v0.2
+Public experimental Android app. Uses rear camera and on-device OCR to identify potential red-ring numeric speed signs; double-checks detections and beeps before text-to-speech. The last possible speed limit remains on screen during continued scanning, with a stale-reading warning after 45 seconds. A potential new sign is highlighted while being checked. Faster frame sampling (220ms cap). Not a legal road-speed authority. Never handle while driving.
