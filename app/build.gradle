@@ -6,8 +6,8 @@ android {
  applicationId 'ie.speedvoice'
  minSdk 34
  targetSdk 35
- versionCode 13
- versionName '0.8.2-speech-diagnostics'
+ versionCode 14
+ versionName '0.9-widget-voice'
  }
  compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
