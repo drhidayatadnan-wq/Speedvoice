@@ -1,1 +1,2 @@
-<resources><string name="accessibility_description">When monitoring is enabled, reads speed-limit labels and captures only the active Google Maps window to recognize red circular speed signs on device. No screen images saved or transmitted. Does not control the screen. Enable only if you agree.</string></resources>
+<resources><string name="accessibility_description">When monitoring is enabled, reads speed-limit labels and captures only the active Google Maps window to recognize red circular speed signs on device. No screen images saved or transmitted. Does not control the screen. Enable only if you agree.</string> <string name="widget_description">One-tap Start and Stop for SpeedVoice monitoring</string>
+</resources>
