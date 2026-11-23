@@ -11,6 +11,7 @@ import android.view.*;
 import android.widget.*;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.app.AlertDialog;
 import androidx.camera.core.*;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.camera.view.PreviewView;
@@ -26,13 +27,14 @@ import java.util.concurrent.*;
 
 public class MainActivity extends AppCompatActivity {
   private PreviewView preview;
-  private TextView number, status, readingHeading, otherSign, laneStatus;
+  private TextView number, status, readingHeading, otherSign, laneStatus, familyStatus;
   private SignOverlay marker;
   private TextRecognizer ocr;
   private TextToSpeech tts;
   private ExecutorService executor;
   private boolean voice=true, speechReady=false, showLanes=true;
   private String latestRoadSign="", checkingRoadSign="", lastSpokenRoadSign="";
+  private long lastFamilyCheck=0,lastFamilySeen=0;
   private int roadSignHits=0;
   private long roadSignAt=0, checkingRoadSignAt=0, lastSpokenRoadSignAt=0;
   private int candidate=-1, confirmations=0, announced=-1, confirmed=-1;
@@ -68,6 +70,8 @@ public class MainActivity extends AppCompatActivity {
     layout.addView(otherSign);
     laneStatus=label("LANE MARKINGS: scanning…",12,0xffaedac8);
     layout.addView(laneStatus);
+    familyStatus=label("RSA WARNING SIGN FAMILIES: scanning…",12,0xfff6cb6f);
+    layout.addView(familyStatus);
     LinearLayout row=new LinearLayout(this);
     Button toggle=new Button(this);toggle.setText("Voice ON");
     toggle.setOnClickListener(v->{voice=!voice;toggle.setText(voice?"Voice ON":"Voice OFF");if(!voice && tts!=null)tts.stop();});
@@ -84,6 +88,14 @@ public class MainActivity extends AppCompatActivity {
     });
     row.addView(laneButton,new LinearLayout.LayoutParams(0,dp(50),1));
     layout.addView(row);
+    Button list=new Button(this);
+    list.setText("RSA IRISH SIGN LIST (SUPPORTED / REFERENCE)");
+    list.setOnClickListener(v->new AlertDialog.Builder(this)
+      .setTitle("Irish road signs — RSA reference")
+      .setMessage(IrishSignCatalog.reference())
+      .setPositiveButton("Close",(dialog,which)->dialog.dismiss())
+      .show());
+    layout.addView(list,new LinearLayout.LayoutParams(-1,dp(48)));
     layout.addView(label("Experimental only • possible false alerts. NOT lane guidance. Follow signs and markings. Do not operate while driving.",12,0xffffffff));
     setContentView(layout);
     executor=Executors.newSingleThreadExecutor();
@@ -138,6 +150,19 @@ public class MainActivity extends AppCompatActivity {
   }
   private void recognise(Text result,Bitmap image){
     long now=SystemClock.elapsedRealtime();
+    if(now-lastFamilyCheck>1050){
+      lastFamilyCheck=now;
+      RoadVision.SignGuess family=RoadVision.possibleIrishWarningFamily(image);
+      if(family!=null){
+        lastFamilySeen=now;
+        String name=family.label.equals("WARNING DIAMOND")
+          ?"POSSIBLE YELLOW WARNING SIGN — symbol unknown"
+          :"POSSIBLE ORANGE ROADWORKS SIGN — symbol unknown";
+        familyStatus.setText(name);
+      }else if(now-lastFamilySeen>5000){
+        familyStatus.setText("RSA WARNING SIGN FAMILIES: scanning…");
+      }
+    }
     RoadVision.LaneEstimate lane=RoadVision.lanes(image);
     if(showLanes){
       marker.markLanes(lane);
@@ -210,7 +235,8 @@ public class MainActivity extends AppCompatActivity {
     if(text.isEmpty())return null;
     Rect rect=line.getBoundingBox();
     if(text.matches(".*\\bSTOP\\b.*") && redNear(image,rect))return "STOP";
-    if(text.contains("YIELD") || text.contains("GEILL SLI"))return "YIELD";
+    if((text.contains("YIELD") || text.contains("GEILL SLI")
+        || text.contains("GEILL")) && redNear(image,rect))return "YIELD";
     if(text.contains("NO ENTRY"))return "NO ENTRY";
     if(text.contains("BUS LANE"))return "BUS LANE";
     if(text.contains("CYCLE LANE") || text.contains("CYCLE TRACK"))return "CYCLE LANE";
@@ -218,6 +244,11 @@ public class MainActivity extends AppCompatActivity {
     if(text.contains("KEEP LEFT"))return "KEEP LEFT";
     if(text.contains("KEEP RIGHT"))return "KEEP RIGHT";
     if(text.contains("ROADWORKS") || text.contains("ROAD WORKS"))return "ROADWORKS";
+    if(text.contains("ROAD MARKINGS"))return "ROAD MARKINGS";
+    if(text.contains("END OF DETOUR"))return "END OF DETOUR";
+    if(text.contains("TEMPORARY TRAFFIC"))return "TEMPORARY TRAFFIC SIGNALS";
+    if(text.contains("SLOW") || text.contains("GO MALL"))return "SLOW";
+    if(text.contains("CONCEALED ENTRANCE"))return "CONCEALED ENTRANCE";
     if(text.contains("PEDESTRIAN CROSSING"))return "PEDESTRIAN CROSSING";
     if(text.contains("NO OVERTAKING"))return "NO OVERTAKING";
     if(text.matches(".*\\bSCHOOL\\b.*"))return "SCHOOL";
