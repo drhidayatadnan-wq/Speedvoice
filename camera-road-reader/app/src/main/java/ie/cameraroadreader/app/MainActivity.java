@@ -32,9 +32,10 @@ public class MainActivity extends AppCompatActivity {
   private TextRecognizer ocr;
   private TextToSpeech tts;
   private ExecutorService executor;
-  private boolean voice=true, speechReady=false, showLanes=true;
+  private boolean voice=true, speechReady=false;
+  private volatile boolean showLanes=true, fastMode=true;
   private String latestRoadSign="", checkingRoadSign="", lastSpokenRoadSign="";
-  private long lastFamilyCheck=0,lastFamilySeen=0;
+  private long lastFamilyCheck=0,lastFamilySeen=0,lastLaneCheck=0,lastNoEntryCheck=0;
   private String checkingFamily="",confirmedFamily="";
   private int familyHits=0;
   private long familyCandidateAt=0,confirmedFamilyAt=0;
@@ -42,7 +43,8 @@ public class MainActivity extends AppCompatActivity {
   private long roadSignAt=0, checkingRoadSignAt=0, lastSpokenRoadSignAt=0;
   private int candidate=-1, confirmations=0, announced=-1, confirmed=-1;
   private long candidateAt=0,lastFrameAt=0,confirmedAt=0,announcedAt=0;
-  private static final long FRAME_INTERVAL_MS=220;
+  // Only a throttle: actual scan rate depends on the camera and ML Kit processing.
+  private static final long FRAME_INTERVAL_MS=120;
   private static final long STALE_AFTER_MS=45000;
   private static final Set<Integer> LIMITS = new HashSet<>(Arrays.asList(20,30,40,50,60,80,100,120));
   private int dp(int n){return (int)(n*getResources().getDisplayMetrics().density+.5f);}
@@ -91,6 +93,13 @@ public class MainActivity extends AppCompatActivity {
     });
     row.addView(laneButton,new LinearLayout.LayoutParams(0,dp(50),1));
     layout.addView(row);
+    Button fastButton=new Button(this);
+    fastButton.setText("SPEED PRIORITY: ON");
+    fastButton.setOnClickListener(v->{
+      fastMode=!fastMode;
+      fastButton.setText(fastMode?"SPEED PRIORITY: ON":"SPEED PRIORITY: OFF");
+    });
+    layout.addView(fastButton,new LinearLayout.LayoutParams(-1,dp(45)));
     Button list=new Button(this);
     list.setText("RSA IRISH SIGN LIST (SUPPORTED / REFERENCE)");
     list.setOnClickListener(v->new AlertDialog.Builder(this)
@@ -145,63 +154,123 @@ public class MainActivity extends AppCompatActivity {
       if(angle==0)bm=raw;
       else{Matrix m=new Matrix();m.postRotate(angle);bm=Bitmap.createBitmap(raw,0,0,w,h,m,true);raw.recycle();}
       Bitmap image=bm;
+      // Run all expensive colour, lane and sign computations away from the UI thread.
+      // Close the camera frame only after OCR and detection are complete.
       ocr.process(InputImage.fromBitmap(image,0))
-        .addOnSuccessListener(result->recognise(result,image))
-        .addOnFailureListener(error->status.setText("OCR retrying"))
-        .addOnCompleteListener(done->{image.recycle();frame.close();});
+        .addOnCompleteListener(executor,task->{
+          try{
+            if(task.isSuccessful())recognise(task.getResult(),image);
+            else runOnUiThread(()->status.setText("Camera text recognition retrying…"));
+          }catch(Exception e){
+            runOnUiThread(()->status.setText("Recognition retrying…"));
+          }finally{
+            image.recycle();
+            frame.close();
+          }
+        });
     }catch(Exception error){if(bm!=null && !bm.isRecycled())bm.recycle();frame.close();}
   }
+  // Runs on the camera analysis executor, not the Android main thread.
+  // Speed is evaluated first; other recognition runs at lower frequency.
   private void recognise(Text result,Bitmap image){
-    long now=SystemClock.elapsedRealtime();
-    if(now-lastFamilyCheck>900){
-      lastFamilyCheck=now;
-      RoadVision.SignGuess family=RoadVision.possibleIrishWarningFamily(image);
-      updateFamily(family,now,image.getWidth(),image.getHeight());
-    }
-    RoadVision.LaneEstimate lane=RoadVision.lanes(image);
-    if(showLanes){
-      marker.markLanes(lane);
-      laneStatus.setText("LANE: "+lane.summary()+" (experimental)");
-    }
-    String roadSign=null;
-    Rect roadSignBounds=null;
-    Integer found=null;
-    Rect bestRect=null;
-    int biggest=0;
+    final long now=SystemClock.elapsedRealtime();
+    final int width=image.getWidth(),height=image.getHeight();
+    Integer speed=null;
+    Rect speedRect=null;
+    int largest=0;
+    String signText=null;
+    Rect signRect=null;
+    boolean sawNumeric=false;
+
     for(Text.TextBlock block:result.getTextBlocks()){
-      String blockSign=identifyRoadSign(block.getText(),block.getBoundingBox(),image);
-      if(blockSign!=null){roadSign=blockSign;roadSignBounds=block.getBoundingBox();}
       for(Text.Line line:block.getLines()){
-        String sign=identifyRoadSign(line.getText(),line.getBoundingBox(),image);
-        if(sign!=null && (roadSign==null || "STOP".equals(sign))){
-          roadSign=sign;
-          roadSignBounds=line.getBoundingBox();
-        }
-        for(Text.Element element:line.getElements()){
-          String text=element.getText().trim();
-          if(!text.matches("[0-9]{2,3}"))continue;
-          int value=Integer.parseInt(text);
-          if(!LIMITS.contains(value))continue;
-          Rect box=element.getBoundingBox();
-          if(box==null || box.height()<8 || !redRing(image,box))continue;
+        for(Text.Element e:line.getElements()){
+          String txt=e.getText().trim().toUpperCase(Locale.ROOT)
+              .replaceAll("\\s+","");
+          if(!txt.matches("[0-9OI]{2,3}"))continue;
+          txt=txt.replace('O','0').replace('I','1');
+          int n;
+          try {n=Integer.parseInt(txt);}catch(NumberFormatException ex){continue;}
+          if(!LIMITS.contains(n))continue;
+          Rect box=e.getBoundingBox();
+          if(box==null || box.height()<8)continue;
+          sawNumeric=true;
+          if(!redRing(image,box))continue;
           int area=box.width()*box.height();
-          if(area>biggest){biggest=area;found=value;bestRect=box;}
+          if(area>largest){largest=area;speed=n;speedRect=new Rect(box);}
+        }
+        // Occasionally ML Kit groups the digits as "5 0" rather than one element.
+        if(speed==null && line.getText().matches("\\s*[0-9]\\s+[0-9]\\s*")){
+          String compact=line.getText().replaceAll("\\s+","");
+          int n=Integer.parseInt(compact);
+          Rect box=line.getBoundingBox();
+          if(LIMITS.contains(n) && box!=null && box.height()>=8){
+            sawNumeric=true;
+            if(redRing(image,box)){speed=n;speedRect=new Rect(box);}
+          }
         }
       }
     }
-    if(roadSign==null){
-      RoadVision.SignGuess shape=RoadVision.possibleNoEntry(image);
-      if(shape!=null){roadSign=shape.label;roadSignBounds=shape.rect;}
+    // Textual road signs are lightweight, but only start after speed OCR.
+    for(Text.TextBlock block:result.getTextBlocks()){
+      String b=identifyRoadSign(block.getText(),block.getBoundingBox(),image);
+      if(b!=null){signText=b;signRect=block.getBoundingBox();}
+      for(Text.Line line:block.getLines()){
+        String candidateSign=identifyRoadSign(line.getText(),line.getBoundingBox(),image);
+        if(candidateSign!=null && (signText==null||"STOP".equals(candidateSign))){
+          signText=candidateSign;
+          signRect=line.getBoundingBox();
+        }
+      }
     }
-    checkRoadSign(roadSign,roadSignBounds,now,image.getWidth(),image.getHeight());
+
+    final boolean runFamily=now-lastFamilyCheck>(fastMode?2200:1100);
+    RoadVision.SignGuess family=null;
+    if(runFamily){
+      lastFamilyCheck=now;
+      family=RoadVision.possibleIrishWarningFamily(image);
+    }
+    final boolean runLane=showLanes && now-lastLaneCheck>(fastMode?1150:650);
+    RoadVision.LaneEstimate lane=null;
+    if(runLane){
+      lastLaneCheck=now;
+      lane=RoadVision.lanes(image);
+    }
+    if(signText==null && now-lastNoEntryCheck>(fastMode?2400:1250)){
+      lastNoEntryCheck=now;
+      RoadVision.SignGuess noEntry=RoadVision.possibleNoEntry(image);
+      if(noEntry!=null){signText=noEntry.label;signRect=noEntry.rect;}
+    }
+    final Integer detectedSpeed=speed;
+    final Rect detectedRect=speedRect;
+    final boolean detectedNumeric=sawNumeric;
+    final String roadSign=signText;
+    final Rect roadSignRect=signRect;
+    final RoadVision.SignGuess familyGuess=family;
+    final RoadVision.LaneEstimate laneGuess=lane;
+    runOnUiThread(()->{
+      if(isFinishing()||isDestroyed())return;
+      if(runFamily)updateFamily(familyGuess,now,width,height);
+      if(laneGuess!=null){
+        marker.markLanes(laneGuess);
+        laneStatus.setText("LANE: "+laneGuess.summary()+" (experimental)");
+      }
+      checkRoadSign(roadSign,roadSignRect,now,width,height);
+      applySpeed(detectedSpeed,detectedRect,detectedNumeric,now,width,height);
+    });
+  }
+
+  private void applySpeed(Integer found,Rect bestRect,boolean sawNumeric,long now,int width,int height){
     if(found==null){
-      if(candidateAt>0 && now-candidateAt>2500){candidate=-1;confirmations=0;}
+      if(candidateAt>0 && now-candidateAt>1600){candidate=-1;confirmations=0;}
       updateStatus(now);
+      if(sawNumeric && candidate<0){
+        status.setText("Numbers seen; checking for a red speed-limit ring");
+      }
       return;
     }
-    marker.mark(bestRect,image.getWidth(),image.getHeight(),found);
-    // Show the possible new sign immediately, without replacing the last verified reading.
-    if(found!=candidate || now-candidateAt>2500){
+    marker.mark(bestRect,width,height,found);
+    if(found!=candidate || now-candidateAt>1600){
       candidate=found;
       candidateAt=now;
       confirmations=1;
@@ -225,6 +294,7 @@ public class MainActivity extends AppCompatActivity {
     }
     updateStatus(now);
   }
+
   private String identifyRoadSign(String raw,Rect rect,Bitmap image){
     if(raw==null)return null;
     String text=java.text.Normalizer.normalize(raw,java.text.Normalizer.Form.NFD)
@@ -484,19 +554,30 @@ public class MainActivity extends AppCompatActivity {
       }
     }
   }
-  private boolean redRing(Bitmap image,Rect rect){
-    double cx=rect.exactCenterX(),cy=rect.exactCenterY(),h=rect.height();
-    for(double radius:new double[]{.85,1.0,1.2,1.4}){
-      int red=0,visible=0;
-      for(int i=0;i<32;i++){
-        double a=2*Math.PI*i/32;
-        int x=(int)(cx+h*radius*Math.cos(a)),y=(int)(cy+h*radius*Math.sin(a));
-        if(x<0||y<0||x>=image.getWidth()||y>=image.getHeight())continue;
-        visible++;
-        int p=image.getPixel(x,y),r=Color.red(p),g=Color.green(p),b=Color.blue(p);
-        if(r>100&&r>g*1.4&&r>b*1.4)red++;
+  private boolean redRing(Bitmap image,Rect box){
+    // The OCR bounding rectangle is smaller than a circular sign; sample
+    // several ring radii around it. Keep red-ring verification to avoid
+    // announcing arbitrary numbers as legal speed limits.
+    double cx=box.exactCenterX(),cy=box.exactCenterY();
+    double scale=Math.max(box.height(),box.width()*.68);
+    for(double factor:new double[]{.83,1.05,1.30,1.60,1.9,2.25}){
+      double radius=scale*factor;
+      int redCount=0,valid=0,quadrants=0;
+      for(int q=0;q<4;q++){
+        int qRed=0;
+        for(int k=0;k<8;k++){
+          double theta=(q*8+k)*2.0*Math.PI/32;
+          int x=(int)Math.round(cx+radius*Math.cos(theta));
+          int y=(int)Math.round(cy+radius*Math.sin(theta));
+          if(x<0||y<0||x>=image.getWidth()||y>=image.getHeight())continue;
+          valid++;
+          int pix=image.getPixel(x,y);
+          int r=Color.red(pix),g=Color.green(pix),b=Color.blue(pix);
+          if(r>108 && r>g*1.35 && r>b*1.32){redCount++;qRed++;}
+        }
+        if(qRed>=1)quadrants++;
       }
-      if(visible>=24&&red>=10)return true;
+      if(valid>=24 && redCount>=7 && quadrants>=3)return true;
     }
     return false;
   }
