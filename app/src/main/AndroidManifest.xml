@@ -10,6 +10,10 @@
 <application android:label="SpeedVoice" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:allowBackup="false" android:supportsRtl="true">
 <activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
 <receiver android:name=".CarConnectionReceiver" android:exported="true" android:permission="android.permission.BLUETOOTH_CONNECT"><intent-filter><action android:name="android.bluetooth.device.action.ACL_CONNECTED"/></intent-filter></receiver>
+<receiver android:name=".SpeedWidget" android:exported="true">
+ <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE"/></intent-filter>
+ <meta-data android:name="android.appwidget.provider" android:resource="@xml/speed_widget_info"/>
+</receiver>
 <activity android:name=".DemoActivity" android:exported="false"/>
 <service android:name=".GpsService" android:exported="false" android:foregroundServiceType="location"/>
 <service android:name=".MapsReader" android:exported="true" android:label="SpeedVoice – Maps reader" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"><intent-filter><action android:name="android.accessibilityservice.AccessibilityService"/></intent-filter><meta-data android:name="android.accessibilityservice" android:resource="@xml/maps_reader"/></service>
