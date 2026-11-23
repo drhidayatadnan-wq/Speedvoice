@@ -19,7 +19,7 @@ import java.util.function.BooleanSupplier;
 
 // Best-effort, local playback metadata only. No microphone or recording.
 final class SpeechGate {
- private static final long QUIET_MS=450, TTL_MS=20000, POLL_MS=200, SPEECH_WAIT_MS=3000;
+ private static final long QUIET_MS=900, TTL_MS=20000, POLL_MS=200;
  private final AudioManager audio;
  private final SharedPreferences prefs;
  private AudioTrack tone;
@@ -30,8 +30,8 @@ final class SpeechGate {
   .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
   .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build();
  private final AudioFocusRequest focus;
- private boolean closed=false,holding=false;
- private long quietSince=-1,retryAfter=0,started=0,seq=0,blockedSince=-1;
+ private boolean closed=false,holding=false,speaking=false;
+ private long quietSince=-1,retryAfter=0,started=0,seq=0;
  private Item pending,active;
  private String activeId;
  private static final class Item {
@@ -43,7 +43,7 @@ final class SpeechGate {
  SpeechGate(Context c,TextToSpeech voice,Handler handler){
   audio=c.getSystemService(AudioManager.class);prefs=c.getSharedPreferences("prefs",Context.MODE_PRIVATE);tts=voice;h=handler;
   tts.setAudioAttributes(attrs);
-  focus=new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+  focus=new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
    .setAudioAttributes(attrs).setWillPauseWhenDucked(true)
    .setOnAudioFocusChangeListener(change->{if(change<0){interrupt(true);quietSince=-1;retryAfter=SystemClock.elapsedRealtime()+1000;}},h)
    .build();
@@ -68,20 +68,20 @@ final class SpeechGate {
   if(pending==null||!pending.usable(SystemClock.elapsedRealtime())||priority>=pending.priority){pending=item;State.voiceDiagnostic="Alert queued for speech";}
  }
  private boolean inCall(){return audio!=null&&(audio.getMode()==AudioManager.MODE_IN_CALL||audio.getMode()==AudioManager.MODE_IN_COMMUNICATION);}
+ // Only dispatch between spoken navigation prompts. Android does not expose
+ // Google Maps' exact utterance state, so playback metadata is best effort.
  private boolean otherSpeech(){
   if(audio==null)return true;
   try{
-   if(audio.getMode()==AudioManager.MODE_IN_CALL||audio.getMode()==AudioManager.MODE_IN_COMMUNICATION)return true;
    for(AudioPlaybackConfiguration p:audio.getActivePlaybackConfigurations()){
-    AudioAttributes a=p.getAudioAttributes();if(a==null)continue;
+    AudioAttributes a=p.getAudioAttributes();
+    if(a==null)continue;
     int usage=a.getUsage(),content=a.getContentType();
-    if(usage==AudioAttributes.USAGE_VOICE_COMMUNICATION)return true;
-    // During our own utterance the navigation stream is active as well.
-    // Treat it as external speech only before dispatch; audio focus handles interruption.
-    if(usage==AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE&&active==null)return true;
-    if(content==AudioAttributes.CONTENT_TYPE_SPEECH&&
-       !(active!=null&&(usage==AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE||
-                         usage==AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)))return true;
+    if(usage==AudioAttributes.USAGE_VOICE_COMMUNICATION||
+       usage==AudioAttributes.USAGE_VOICE_COMMUNICATION_SIGNALLING||
+       content==AudioAttributes.CONTENT_TYPE_SPEECH||
+       (usage==AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE&&
+        content!=AudioAttributes.CONTENT_TYPE_SONIFICATION))return true;
    }
    return false;
   }catch(RuntimeException e){return true;}
@@ -89,43 +89,59 @@ final class SpeechGate {
  private void tick(){
   long now=SystemClock.elapsedRealtime();
   if(pending!=null&&!pending.usable(now)){pending=null;State.voiceDiagnostic="Alert expired or recognition no longer valid";}
-  if(active!=null&&!active.usable(now)){interrupt(false);}
-  if(active!=null&&now-started>10000){interrupt(false);}
-  if(pending==null&&active==null){quietSince=-1;blockedSince=-1;return;}
-  if(inCall()){quietSince=-1;blockedSince=-1;State.voiceDiagnostic="Phone call active — speech deferred";if(active!=null)interrupt(true);return;}
-  boolean competing=otherSpeech();
-  if(competing){
-   if(blockedSince<0)blockedSince=now;
-   if(active!=null){interrupt(true);return;}
-   if(now-blockedSince<SPEECH_WAIT_MS){
-    State.voiceDiagnostic="Waiting for navigation speech ("+((SPEECH_WAIT_MS-(now-blockedSince)+999)/1000)+" s max)";
-    quietSince=-1;return;
-   }
-   State.voiceDiagnostic="Navigation speech busy; requesting focus for warning";
-  }else blockedSince=-1;
+  if(active!=null&&!active.usable(now))interrupt(false);
+  if(active!=null&&now-started>10000)interrupt(false);
+  if(pending==null&&active==null){quietSince=-1;return;}
+  if(inCall()){
+   quietSince=-1;
+   State.voiceDiagnostic="Phone call active — speech deferred";
+   if(active!=null)interrupt(true);
+   return;
+  }
+  // Once our own TTS starts, its playback is also reported as speech.
+  // Audio-focus loss interrupts it; do not mistake our own audio for Maps.
+  if(active!=null&&speaking)return;
+  if(otherSpeech()){
+   quietSince=-1;
+   State.voiceDiagnostic="Navigation/other speech active — waiting for a gap";
+   if(active!=null)interrupt(true);
+   return;
+  }
   if(quietSince<0)quietSince=now;
   if(active!=null||pending==null||now<retryAfter||now-quietSince<QUIET_MS)return;
-  if(audio.requestAudioFocus(focus)!=AudioManager.AUDIOFOCUS_REQUEST_GRANTED){State.voiceDiagnostic="Audio focus denied; retrying";retryAfter=now+1000;quietSince=-1;return;}
-  holding=true;
-  if(inCall()|| (otherSpeech()&&blockedSince>=0&&now-blockedSince<SPEECH_WAIT_MS)||!pending.usable(now)){releaseFocus();quietSince=-1;return;}
-  active=pending;pending=null;activeId="speedvoice-gate-"+(++seq);started=now;
-  int mode=prefs.getInt("alert_mode",2);
-  if(active.priority==2&&mode!=0){
-   int excess=active.excess.getAsInt(); int count=mode==4?(excess>=15?3:excess>=5?2:1):(mode==1?1:2);
-   if(startTone(count)){
-    final String id=activeId;
-    afterTone=()->{
-     afterTone=null;stopTone();
-     if(active==null||!id.equals(activeId))return;
-     if(!active.usable(SystemClock.elapsedRealtime())){interrupt(false);return;}
-     if(inCall()||(otherSpeech()&&blockedSince>=0&&SystemClock.elapsedRealtime()-blockedSince<SPEECH_WAIT_MS)){interrupt(true);return;}
-     if(mode==3)finished(id);else speakActive();
-    };
-    h.postDelayed(afterTone,300+240L*(count-1));
-    return;
-   }
-   if(mode==3){finished(activeId);return;}
+  if(audio==null||audio.requestAudioFocus(focus)!=AudioManager.AUDIOFOCUS_REQUEST_GRANTED){
+   State.voiceDiagnostic="Audio focus denied; retrying";
+   retryAfter=now+1000;quietSince=-1;return;
   }
+  holding=true;
+  // Re-check after acquiring transient focus so a newly started Maps
+  // direction does not race our warning beep.
+  if(inCall()||otherSpeech()||!pending.usable(now)){
+   releaseFocus();quietSince=-1;return;
+  }
+  active=pending;pending=null;activeId="speedvoice-gate-"+(++seq);started=now;speaking=false;
+  int mode=prefs.getInt("alert_mode",2);
+  int count=1; // Brief attention beep before ordinary speed-limit speech.
+  if(active.priority==2){
+   if(mode==0){speakActive();return;} // Respect explicit voice-only choice.
+   int excess=active.excess.getAsInt();
+   count=mode==4?(excess>=15?3:excess>=5?2:1):(mode==1?1:2);
+  }
+  if(startTone(count)){
+   State.voiceDiagnostic="Attention beep — speech follows when clear";
+   final String id=activeId;
+   afterTone=()->{
+    afterTone=null;stopTone();
+    if(active==null||!id.equals(activeId))return;
+    if(!active.usable(SystemClock.elapsedRealtime())){interrupt(false);return;}
+    if(inCall()||otherSpeech()){interrupt(true);return;}
+    if(active.priority==2&&mode==3)finished(id);
+    else speakActive();
+   };
+   h.postDelayed(afterTone,300+240L*(count-1));
+   return;
+  }
+  if(active.priority==2&&mode==3){finished(activeId);return;}
   speakActive();
  }
  private float volume(){return Math.max(.25f,Math.min(1f,prefs.getInt("alert_volume",100)/100f));}
@@ -133,6 +149,7 @@ final class SpeechGate {
   if(active==null)return;
   String text=active.text.get();
   if(text==null||text.isEmpty()){State.voiceDiagnostic="Alert no longer applicable";interrupt(false);return;}
+  speaking=true;
   Bundle params=new Bundle();params.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME,volume());
   int queued=tts.speak(text,TextToSpeech.QUEUE_FLUSH,params,activeId);
   if(queued!=TextToSpeech.SUCCESS){State.voiceDiagnostic="TTS rejected speech request";interrupt(false);}else State.voiceDiagnostic="TTS speech request accepted";
@@ -160,10 +177,10 @@ final class SpeechGate {
  }
  private void finished(String id){
   if(activeId==null||!activeId.equals(id))return;
-  stopTone();active=null;activeId=null;releaseFocus();quietSince=-1;blockedSince=-1;
+  stopTone();active=null;activeId=null;speaking=false;releaseFocus();quietSince=-1;
  }
  private void interrupt(boolean retry){
-  Item old=active;active=null;activeId=null;stopTone();
+  Item old=active;active=null;activeId=null;speaking=false;stopTone();
   if(old!=null)tts.stop();
   releaseFocus();quietSince=-1;
   if(retry&&old!=null&&old.usable(SystemClock.elapsedRealtime())&&(pending==null||pending.priority<old.priority))pending=old;
