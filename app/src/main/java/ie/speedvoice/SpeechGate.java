@@ -19,7 +19,7 @@ import java.util.function.BooleanSupplier;
 
 // Best-effort, local playback metadata only. No microphone or recording.
 final class SpeechGate {
- private static final long QUIET_MS=750, TTL_MS=20000, POLL_MS=200;
+ private static final long QUIET_MS=450, TTL_MS=20000, POLL_MS=200, SPEECH_WAIT_MS=3000;
  private final AudioManager audio;
  private final SharedPreferences prefs;
  private AudioTrack tone;
@@ -31,7 +31,7 @@ final class SpeechGate {
   .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build();
  private final AudioFocusRequest focus;
  private boolean closed=false,holding=false;
- private long quietSince=-1,retryAfter=0,started=0,seq=0;
+ private long quietSince=-1,retryAfter=0,started=0,seq=0,blockedSince=-1;
  private Item pending,active;
  private String activeId;
  private static final class Item {
@@ -67,6 +67,7 @@ final class SpeechGate {
   Item item=new Item(text,priority,valid,excess);
   if(pending==null||!pending.usable(SystemClock.elapsedRealtime())||priority>=pending.priority){pending=item;State.voiceDiagnostic="Alert queued for speech";}
  }
+ private boolean inCall(){return audio!=null&&(audio.getMode()==AudioManager.MODE_IN_CALL||audio.getMode()==AudioManager.MODE_IN_COMMUNICATION);}
  private boolean otherSpeech(){
   if(audio==null)return true;
   try{
@@ -90,13 +91,23 @@ final class SpeechGate {
   if(pending!=null&&!pending.usable(now)){pending=null;State.voiceDiagnostic="Alert expired or recognition no longer valid";}
   if(active!=null&&!active.usable(now)){interrupt(false);}
   if(active!=null&&now-started>10000){interrupt(false);}
-  if(pending==null&&active==null){quietSince=-1;return;}
-  if(otherSpeech()){quietSince=-1;State.voiceDiagnostic="Waiting for other speech/navigation audio";if(active!=null)interrupt(true);return;}
+  if(pending==null&&active==null){quietSince=-1;blockedSince=-1;return;}
+  if(inCall()){quietSince=-1;blockedSince=-1;State.voiceDiagnostic="Phone call active — speech deferred";if(active!=null)interrupt(true);return;}
+  boolean competing=otherSpeech();
+  if(competing){
+   if(blockedSince<0)blockedSince=now;
+   if(active!=null){interrupt(true);return;}
+   if(now-blockedSince<SPEECH_WAIT_MS){
+    State.voiceDiagnostic="Waiting for navigation speech ("+((SPEECH_WAIT_MS-(now-blockedSince)+999)/1000)+" s max)";
+    quietSince=-1;return;
+   }
+   State.voiceDiagnostic="Navigation speech busy; requesting focus for warning";
+  }else blockedSince=-1;
   if(quietSince<0)quietSince=now;
   if(active!=null||pending==null||now<retryAfter||now-quietSince<QUIET_MS)return;
   if(audio.requestAudioFocus(focus)!=AudioManager.AUDIOFOCUS_REQUEST_GRANTED){State.voiceDiagnostic="Audio focus denied; retrying";retryAfter=now+1000;quietSince=-1;return;}
   holding=true;
-  if(otherSpeech()||!pending.usable(now)){releaseFocus();quietSince=-1;return;}
+  if(inCall()|| (otherSpeech()&&blockedSince>=0&&now-blockedSince<SPEECH_WAIT_MS)||!pending.usable(now)){releaseFocus();quietSince=-1;return;}
   active=pending;pending=null;activeId="speedvoice-gate-"+(++seq);started=now;
   int mode=prefs.getInt("alert_mode",2);
   if(active.priority==2&&mode!=0){
@@ -107,7 +118,7 @@ final class SpeechGate {
      afterTone=null;stopTone();
      if(active==null||!id.equals(activeId))return;
      if(!active.usable(SystemClock.elapsedRealtime())){interrupt(false);return;}
-     if(otherSpeech()){interrupt(true);return;}
+     if(inCall()||(otherSpeech()&&blockedSince>=0&&SystemClock.elapsedRealtime()-blockedSince<SPEECH_WAIT_MS)){interrupt(true);return;}
      if(mode==3)finished(id);else speakActive();
     };
     h.postDelayed(afterTone,300+240L*(count-1));
@@ -149,7 +160,7 @@ final class SpeechGate {
  }
  private void finished(String id){
   if(activeId==null||!activeId.equals(id))return;
-  stopTone();active=null;activeId=null;releaseFocus();quietSince=-1;
+  stopTone();active=null;activeId=null;releaseFocus();quietSince=-1;blockedSince=-1;
  }
  private void interrupt(boolean retry){
   Item old=active;active=null;activeId=null;stopTone();
