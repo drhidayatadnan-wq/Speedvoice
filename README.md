@@ -52,3 +52,9 @@ Separate experimental repair branch based on v0.8: prevents obsolete screenshot/
 
 ## v0.8.2 speech-diagnostics test (experimental)
 Based on v0.8.1 in a separate branch. Routes speech and alert beeps using Android navigation guidance audio (normally controlled by media volume), with best-effort audio-focus protection. Adds independent Test voice and Test beep buttons that work without GPS or Google Maps, shows live Reader and Voice diagnostics, improves English TTS locale fallbacks, and queues one non-speed-limit monitoring acknowledgement after Maps becomes visible. Demo displays the speech-gate status. **Voice tests and a successful build do not validate speed-limit recognition.** Test only while stationary; do not rely on alerts for driving or legal compliance. Older branches are unchanged.
+
+
+## v0.9 widget + voice reliability (experimental)
+Build from `v0.9-widget-voice`. Adds a Samsung/Android home-screen widget with Start and Stop buttons. Add from **Home screen → Widgets → SpeedVoice**. On first use, accept the safety disclosure and grant precise-location permissions; enable the Maps reader in Accessibility Settings. Later taps on **Start** open the app briefly to request the location foreground service and then open Google Maps; **Stop** directly stops the service. The widget reflects the service state. Google Maps must be visible in portrait mode with a readable speed-limit sign. Navigation may need to be started manually.
+
+Speech-gate v0.9 bounds deferral for other navigation speech before attempting audio focus instead of silently waiting forever. Calls still defer speech, and Android audio behavior remains best-effort. **This is not proof that announcements are audible on your device.** Verify **Test voice** and **Test beep**, then simulated speed-limit and overspeed warnings while safely parked; test car Bluetooth audio separately. Do not use the experimental app for legal speed-limit compliance or driving decisions.
