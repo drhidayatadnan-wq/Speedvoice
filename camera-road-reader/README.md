@@ -1,4 +1,4 @@
-# Camera Road Reader v0.4
+# Camera Road Reader v0.5 — Speed priority fix
 
 Source for the sign names and families: official RSA *Rules of the Road*, particularly Section 6 on traffic signs and road markings: https://www.rsa.ie/services/learner-drivers/resources/rules-of-the-road
 
@@ -21,3 +21,12 @@ This experimental Android app uses ML Kit OCR and basic camera heuristics. The *
 - Signs may be misread or missed and lane overlay may be wrong. Never rely on the app to decide road legality, driving speed, lane selection or safe manoeuvres. Test while stationary. Do not view or operate the phone while driving.
 
 Development project remains on the public `camera-road-reader-v0.1` branch of the Speedvoice repository, without modifying SpeedVoice main.
+
+## v0.5 camera scan repair
+- Speed text recognition is now prioritized, with immediate UI dispatch before additional sign/lane image checks.
+- ML Kit result processing and heavy image scans run on the background camera executor, rather than on the UI thread.
+- Camera scan throttle reduced from 220 ms to 120 ms; actual throughput depends on OCR performance, camera and device.
+- Red-ring verification now searches a larger set of radii and angles while retaining multi-frame confirmation for spoken alerts.
+- Default **SPEED PRIORITY ON** limits visual lane scans to about once per 1.15 seconds, yellow/orange family signs about every 2.2 seconds, and no-entry shape scanning about every 2.4 seconds. Turn off for denser secondary sign processing.
+- When OCR sees numerals without adequate red-ring evidence, the app shows an unverified reading status, not a speed-limit announcement.
+- Experimental only. Never rely on camera recognition for speed, right of way, or lane choice.
