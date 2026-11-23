@@ -29,19 +29,27 @@ jobs:
           if-no-files-found: error
 
       - name: Publish experimental debug APK as prerelease
-        if: ${{ github.ref == 'refs/heads/v0.8.2-speech-diagnostics' }}
+        if: ${{ github.ref == 'refs/heads/v0.8.2-speech-diagnostics' || github.ref == 'refs/heads/v0.9-widget-voice' }}
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         shell: bash
         run: |
           set -euo pipefail
-          TAG="v0.8.2-speech-diagnostics"
-          cp app/build/outputs/apk/debug/app-debug.apk SpeedVoice-v0.8.2-debug.apk
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" SpeedVoice-v0.8.2-debug.apk --clobber
+          if [[ "${GITHUB_REF}" == "refs/heads/v0.9-widget-voice" ]]; then
+            TAG="v0.9-widget-voice"
+            APK="SpeedVoice-v0.9-debug.apk"
+            TITLE="SpeedVoice v0.9 — widget and voice diagnostics (experimental)"
           else
-            gh release create "$TAG" SpeedVoice-v0.8.2-debug.apk --prerelease \
-              --title "SpeedVoice v0.8.2 — experimental debug APK" \
+            TAG="v0.8.2-speech-diagnostics"
+            APK="SpeedVoice-v0.8.2-debug.apk"
+            TITLE="SpeedVoice v0.8.2 — experimental debug APK"
+          fi
+          cp app/build/outputs/apk/debug/app-debug.apk "$APK"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$APK" --clobber
+          else
+            gh release create "$TAG" "$APK" --target "$GITHUB_SHA" --prerelease \
+              --title "$TITLE" \
               --notes "Experimental test build, not verified for real-world driving. Do not rely on speed-limit or overspeed announcements; follow road signs and the vehicle speedometer. Test only while safely parked. Debug builds may require removing older differently signed APKs."
           fi
