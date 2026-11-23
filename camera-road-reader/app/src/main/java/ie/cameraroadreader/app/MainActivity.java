@@ -26,12 +26,15 @@ import java.util.concurrent.*;
 
 public class MainActivity extends AppCompatActivity {
   private PreviewView preview;
-  private TextView number, status, readingHeading;
+  private TextView number, status, readingHeading, otherSign, laneStatus;
   private SignOverlay marker;
   private TextRecognizer ocr;
   private TextToSpeech tts;
   private ExecutorService executor;
-  private boolean voice=true, speechReady=false;
+  private boolean voice=true, speechReady=false, showLanes=true;
+  private String latestRoadSign="", checkingRoadSign="", lastSpokenRoadSign="";
+  private int roadSignHits=0;
+  private long roadSignAt=0, checkingRoadSignAt=0, lastSpokenRoadSignAt=0;
   private int candidate=-1, confirmations=0, announced=-1, confirmed=-1;
   private long candidateAt=0,lastFrameAt=0,confirmedAt=0,announcedAt=0;
   private static final long FRAME_INTERVAL_MS=220;
@@ -50,7 +53,7 @@ public class MainActivity extends AppCompatActivity {
     layout.setBackgroundColor(0xff142338);
     layout.setPadding(dp(10),dp(30),dp(10),dp(10));
     layout.addView(label("CAMERA ROAD READER",22,0xff75edb9));
-    layout.addView(label("Experimental speed sign recognition",12,0xffffffff));
+    layout.addView(label("Speed limits • road signs • experimental lane overlay",12,0xffffffff));
     FrameLayout cameraPanel=new FrameLayout(this);
     preview=new PreviewView(this);
     preview.setScaleType(PreviewView.ScaleType.FILL_CENTER);
@@ -61,6 +64,10 @@ public class MainActivity extends AppCompatActivity {
     readingHeading=label("WAITING FOR FIRST SIGN",12,0xfff6cb6f);layout.addView(readingHeading);
     number=label("— km/h",46,0xffffffff);layout.addView(number);
     status=label("Starting camera…",14,0xff75edb9);layout.addView(status);
+    otherSign=label("ROAD SIGN: scanning…",17,0xfff6cb6f);
+    layout.addView(otherSign);
+    laneStatus=label("LANE MARKINGS: scanning…",12,0xffaedac8);
+    layout.addView(laneStatus);
     LinearLayout row=new LinearLayout(this);
     Button toggle=new Button(this);toggle.setText("Voice ON");
     toggle.setOnClickListener(v->{voice=!voice;toggle.setText(voice?"Voice ON":"Voice OFF");if(!voice && tts!=null)tts.stop();});
@@ -68,8 +75,16 @@ public class MainActivity extends AppCompatActivity {
     Button demo=new Button(this);demo.setText("DEMO 50");
     demo.setOnClickListener(v->{status.setText("Demo (not a camera detection)");speak("Demo. Possible speed limit 50 kilometres per hour");});
     row.addView(demo,new LinearLayout.LayoutParams(0,dp(50),1));
+    Button laneButton=new Button(this);laneButton.setText("LANES ON");
+    laneButton.setOnClickListener(v->{
+      showLanes=!showLanes;
+      laneButton.setText(showLanes?"LANES ON":"LANES OFF");
+      marker.enableLanes(showLanes);
+      if(!showLanes)laneStatus.setText("LANE OVERLAY: off");
+    });
+    row.addView(laneButton,new LinearLayout.LayoutParams(0,dp(50),1));
     layout.addView(row);
-    layout.addView(label("Advisory prototype only. Follow actual road signs. Never handle your phone while driving.",12,0xffffffff));
+    layout.addView(label("Experimental only • possible false alerts. NOT lane guidance. Follow signs and markings. Do not operate while driving.",12,0xffffffff));
     setContentView(layout);
     executor=Executors.newSingleThreadExecutor();
     ocr=TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
@@ -122,11 +137,24 @@ public class MainActivity extends AppCompatActivity {
     }catch(Exception error){if(bm!=null && !bm.isRecycled())bm.recycle();frame.close();}
   }
   private void recognise(Text result,Bitmap image){
+    long now=SystemClock.elapsedRealtime();
+    RoadVision.LaneEstimate lane=RoadVision.lanes(image);
+    if(showLanes){
+      marker.markLanes(lane);
+      laneStatus.setText("LANE: "+lane.summary()+" (experimental)");
+    }
+    String roadSign=null;
+    Rect roadSignBounds=null;
     Integer found=null;
     Rect bestRect=null;
     int biggest=0;
     for(Text.TextBlock block:result.getTextBlocks()){
       for(Text.Line line:block.getLines()){
+        String sign=identifyRoadSign(line,image);
+        if(sign!=null && (roadSign==null || "STOP".equals(sign))){
+          roadSign=sign;
+          roadSignBounds=line.getBoundingBox();
+        }
         for(Text.Element element:line.getElements()){
           String text=element.getText().trim();
           if(!text.matches("[0-9]{2,3}"))continue;
@@ -139,7 +167,11 @@ public class MainActivity extends AppCompatActivity {
         }
       }
     }
-    long now=SystemClock.elapsedRealtime();
+    if(roadSign==null){
+      RoadVision.SignGuess shape=RoadVision.possibleNoEntry(image);
+      if(shape!=null){roadSign=shape.label;roadSignBounds=shape.rect;}
+    }
+    checkRoadSign(roadSign,roadSignBounds,now,image.getWidth(),image.getHeight());
     if(found==null){
       if(candidateAt>0 && now-candidateAt>2500){candidate=-1;confirmations=0;}
       updateStatus(now);
@@ -171,6 +203,70 @@ public class MainActivity extends AppCompatActivity {
     }
     updateStatus(now);
   }
+  private String identifyRoadSign(Text.Line line,Bitmap image){
+    String text=line.getText().toUpperCase(Locale.ROOT)
+      .replaceAll("[^A-Z ]"," ").replaceAll(" +"," ").trim();
+    if(text.isEmpty())return null;
+    Rect rect=line.getBoundingBox();
+    if(text.matches(".*\\bSTOP\\b.*") && redNear(image,rect))return "STOP";
+    if(text.contains("YIELD") || text.contains("GEILL SLI"))return "YIELD";
+    if(text.contains("NO ENTRY"))return "NO ENTRY";
+    if(text.contains("BUS LANE"))return "BUS LANE";
+    if(text.contains("CYCLE LANE") || text.contains("CYCLE TRACK"))return "CYCLE LANE";
+    if(text.contains("ONE WAY"))return "ONE WAY";
+    if(text.contains("KEEP LEFT"))return "KEEP LEFT";
+    if(text.contains("KEEP RIGHT"))return "KEEP RIGHT";
+    if(text.matches(".*\\bSCHOOL\\b.*"))return "SCHOOL";
+    return null;
+  }
+  private boolean redNear(Bitmap image,Rect rect){
+    if(rect==null)return false;
+    int pad=Math.max(10,rect.height());
+    int x0=Math.max(0,rect.left-pad),x1=Math.min(image.getWidth()-1,rect.right+pad);
+    int y0=Math.max(0,rect.top-pad),y1=Math.min(image.getHeight()-1,rect.bottom+pad);
+    if(x1<=x0||y1<=y0)return false;
+    int red=0;
+    for(int y=y0;y<=y1;y+=Math.max(2,(y1-y0)/12)){
+      for(int x=x0;x<=x1;x+=Math.max(2,(x1-x0)/12)){
+        int p=image.getPixel(x,y);
+        if(Color.red(p)>115 && Color.red(p)>Color.green(p)*1.5f
+          && Color.red(p)>Color.blue(p)*1.45f)red++;
+      }
+    }
+    return red>=10;
+  }
+  private void checkRoadSign(String sign,Rect bounds,long now,int imageWidth,int imageHeight){
+    if(sign==null){
+      if(checkingRoadSignAt>0 && now-checkingRoadSignAt>2000){
+        checkingRoadSign="";roadSignHits=0;
+      }
+    }else{
+      if(bounds!=null)marker.markRoadSign(bounds,imageWidth,imageHeight,sign);
+      if(!sign.equals(checkingRoadSign) || now-checkingRoadSignAt>2500){
+        checkingRoadSign=sign;roadSignHits=1;
+      }else roadSignHits++;
+      checkingRoadSignAt=now;
+      if(roadSignHits>=2){
+        latestRoadSign=sign;
+        roadSignAt=now;
+        if(!sign.equals(lastSpokenRoadSign)||now-lastSpokenRoadSignAt>90000){
+          lastSpokenRoadSign=sign;
+          lastSpokenRoadSignAt=now;
+          speak("Possible "+sign.toLowerCase(Locale.UK).replace("yield","give way")+" sign");
+        }
+        checkingRoadSign="";roadSignHits=0;
+      }
+    }
+    if(!checkingRoadSign.isEmpty()){
+      otherSign.setText("CHECKING POSSIBLE: "+checkingRoadSign);
+    }else if(latestRoadSign.isEmpty()){
+      otherSign.setText("ROAD SIGNS: scanning…");
+    }else if(now-roadSignAt>30000){
+      otherSign.setText("OLD SIGN: "+latestRoadSign+" (stale)");
+    }else{
+      otherSign.setText("LAST POSSIBLE SIGN: "+latestRoadSign);
+    }
+  }
   private void updateStatus(long now){
     if(confirmed<0){
       readingHeading.setText("WAITING FOR FIRST SIGN");
@@ -194,41 +290,91 @@ public class MainActivity extends AppCompatActivity {
   }
   private class SignOverlay extends View{
     private final Paint outline=new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint roadPaint=new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint lanePaint=new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint textPaint=new Paint(Paint.ANTI_ALIAS_FLAG);
-    private Rect detectedBox;
+    private Rect speedBox,roadBox;
+    private String roadLabel="";
     private int imgW,imgH,detectedLimit;
-    private long markedAt=0;
+    private long speedMarkedAt=0,roadMarkedAt=0,laneMarkedAt=0;
+    private boolean lanesEnabled=true;
+    private RoadVision.LaneEstimate laneEstimate;
     SignOverlay(){
       super(MainActivity.this);
       setClickable(false);
       outline.setColor(0xff75edb9);
       outline.setStyle(Paint.Style.STROKE);
       outline.setStrokeWidth(dp(3));
+      roadPaint.setColor(0xffffd36e);
+      roadPaint.setStyle(Paint.Style.STROKE);
+      roadPaint.setStrokeWidth(dp(3));
+      lanePaint.setColor(0xff5ce8ff);
+      lanePaint.setStyle(Paint.Style.STROKE);
+      lanePaint.setStrokeWidth(dp(3));
+      lanePaint.setPathEffect(new DashPathEffect(new float[]{dp(14),dp(8)},0));
       textPaint.setColor(0xff75edb9);
       textPaint.setTypeface(Typeface.DEFAULT_BOLD);
-      textPaint.setTextSize(dp(17));
+      textPaint.setTextSize(dp(15));
       textPaint.setShadowLayer(dp(2),0,0,0xff000000);
+    }
+    void enableLanes(boolean enabled){lanesEnabled=enabled;invalidate();}
+    void markLanes(RoadVision.LaneEstimate estimate) {
+      laneEstimate=estimate;
+      laneMarkedAt=SystemClock.elapsedRealtime();
+      invalidate();
     }
     void mark(Rect box,int width,int height,int speed){
       int pad=Math.max(10,box.height());
-      detectedBox=new Rect(box.left-pad,box.top-pad,box.right+pad,box.bottom+pad);
+      speedBox=new Rect(box.left-pad,box.top-pad,box.right+pad,box.bottom+pad);
       imgW=width;imgH=height;detectedLimit=speed;
-      markedAt=SystemClock.elapsedRealtime();
-      invalidate();
-      postInvalidateDelayed(1400);
+      speedMarkedAt=SystemClock.elapsedRealtime();
+      invalidate();postInvalidateDelayed(1400);
+    }
+    void markRoadSign(Rect box,int width,int height,String label){
+      int pad=Math.max(8,box.height()/2);
+      roadBox=new Rect(box.left-pad,box.top-pad,box.right+pad,box.bottom+pad);
+      roadLabel=label;
+      imgW=width;imgH=height;
+      roadMarkedAt=SystemClock.elapsedRealtime();
+      invalidate();postInvalidateDelayed(1400);
     }
     @Override protected void onDraw(Canvas c){
       super.onDraw(c);
-      if(detectedBox==null || imgW==0 || imgH==0 ||
-          SystemClock.elapsedRealtime()-markedAt>1300)return;
-      float factor=Math.max(getWidth()/(float)imgW,getHeight()/(float)imgH);
-      float dx=(getWidth()-imgW*factor)/2f;
-      float dy=(getHeight()-imgH*factor)/2f;
-      RectF area=new RectF(detectedBox.left*factor+dx,detectedBox.top*factor+dy,
-          detectedBox.right*factor+dx,detectedBox.bottom*factor+dy);
-      c.drawRoundRect(area,dp(7),dp(7),outline);
-      c.drawText("CHECKING "+detectedLimit,Math.max(dp(4),area.left),
-          Math.max(dp(22),area.top-dp(7)),textPaint);
+      long now=SystemClock.elapsedRealtime();
+      if(lanesEnabled && laneEstimate!=null && now-laneMarkedAt<1400){
+        RoadVision.LaneEstimate lane=laneEstimate;
+        float ratio=Math.max(getWidth()/(float)lane.imageWidth,getHeight()/(float)lane.imageHeight);
+        float xoff=(getWidth()-lane.imageWidth*ratio)/2f;
+        float yoff=(getHeight()-lane.imageHeight*ratio)/2f;
+        if(lane.leftVisible()){
+          c.drawLine(lane.leftFar*ratio+xoff,lane.yFar*ratio+yoff,
+            lane.leftNear*ratio+xoff,lane.yNear*ratio+yoff,lanePaint);
+        }
+        if(lane.rightVisible()){
+          c.drawLine(lane.rightFar*ratio+xoff,lane.yFar*ratio+yoff,
+            lane.rightNear*ratio+xoff,lane.yNear*ratio+yoff,lanePaint);
+        }
+      }
+      if(imgW<=0||imgH<=0)return;
+      float ratio=Math.max(getWidth()/(float)imgW,getHeight()/(float)imgH);
+      float xoff=(getWidth()-imgW*ratio)/2f;
+      float yoff=(getHeight()-imgH*ratio)/2f;
+      if(speedBox!=null && now-speedMarkedAt<1300){
+        RectF area=new RectF(speedBox.left*ratio+xoff,speedBox.top*ratio+yoff,
+          speedBox.right*ratio+xoff,speedBox.bottom*ratio+yoff);
+        c.drawRoundRect(area,dp(7),dp(7),outline);
+        textPaint.setColor(0xff75edb9);
+        c.drawText("CHECK "+detectedLimit,Math.max(dp(4),area.left),
+          Math.max(dp(18),area.top-dp(5)),textPaint);
+      }
+      if(roadBox!=null && now-roadMarkedAt<1300){
+        RectF area=new RectF(roadBox.left*ratio+xoff,roadBox.top*ratio+yoff,
+          roadBox.right*ratio+xoff,roadBox.bottom*ratio+yoff);
+        c.drawRoundRect(area,dp(7),dp(7),roadPaint);
+        textPaint.setColor(0xffffd36e);
+        c.drawText("POSSIBLE "+roadLabel,Math.max(dp(4),area.left),
+          Math.max(dp(20),area.top-dp(7)),textPaint);
+      }
     }
   }
   private boolean redRing(Bitmap image,Rect rect){
