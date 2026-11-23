@@ -6,8 +6,8 @@ android {
  applicationId 'ie.speedvoice'
  minSdk 34
  targetSdk 35
- versionCode 14
- versionName '0.9-widget-voice'
+ versionCode 15
+ versionName '0.9.1-beep-navigation-priority'
  }
  compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
