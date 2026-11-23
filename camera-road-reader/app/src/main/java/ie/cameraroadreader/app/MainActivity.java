@@ -211,6 +211,14 @@ public class MainActivity extends AppCompatActivity {
         }
       }
     }
+    // Publish the potential speed immediately; extra visual work must never delay it.
+    final Integer speedNow=speed;
+    final Rect speedRectNow=speedRect;
+    final boolean numericNow=sawNumeric;
+    runOnUiThread(()->{
+      if(!isFinishing()&&!isDestroyed())
+        applySpeed(speedNow,speedRectNow,numericNow,now,width,height);
+    });
     // Textual road signs are lightweight, but only start after speed OCR.
     for(Text.TextBlock block:result.getTextBlocks()){
       String b=identifyRoadSign(block.getText(),block.getBoundingBox(),image);
@@ -241,9 +249,6 @@ public class MainActivity extends AppCompatActivity {
       RoadVision.SignGuess noEntry=RoadVision.possibleNoEntry(image);
       if(noEntry!=null){signText=noEntry.label;signRect=noEntry.rect;}
     }
-    final Integer detectedSpeed=speed;
-    final Rect detectedRect=speedRect;
-    final boolean detectedNumeric=sawNumeric;
     final String roadSign=signText;
     final Rect roadSignRect=signRect;
     final RoadVision.SignGuess familyGuess=family;
@@ -256,7 +261,6 @@ public class MainActivity extends AppCompatActivity {
         laneStatus.setText("LANE: "+laneGuess.summary()+" (experimental)");
       }
       checkRoadSign(roadSign,roadSignRect,now,width,height);
-      applySpeed(detectedSpeed,detectedRect,detectedNumeric,now,width,height);
     });
   }
 
