@@ -204,7 +204,8 @@ public class MainActivity extends AppCompatActivity {
     updateStatus(now);
   }
   private String identifyRoadSign(Text.Line line,Bitmap image){
-    String text=line.getText().toUpperCase(Locale.ROOT)
+    String text=java.text.Normalizer.normalize(line.getText(),java.text.Normalizer.Form.NFD)
+      .replaceAll("\\p{M}+","").toUpperCase(Locale.ROOT)
       .replaceAll("[^A-Z ]"," ").replaceAll(" +"," ").trim();
     if(text.isEmpty())return null;
     Rect rect=line.getBoundingBox();
@@ -216,6 +217,9 @@ public class MainActivity extends AppCompatActivity {
     if(text.contains("ONE WAY"))return "ONE WAY";
     if(text.contains("KEEP LEFT"))return "KEEP LEFT";
     if(text.contains("KEEP RIGHT"))return "KEEP RIGHT";
+    if(text.contains("ROADWORKS") || text.contains("ROAD WORKS"))return "ROADWORKS";
+    if(text.contains("PEDESTRIAN CROSSING"))return "PEDESTRIAN CROSSING";
+    if(text.contains("NO OVERTAKING"))return "NO OVERTAKING";
     if(text.matches(".*\\bSCHOOL\\b.*"))return "SCHOOL";
     return null;
   }
