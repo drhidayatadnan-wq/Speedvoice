@@ -30,7 +30,7 @@ public class MainActivity extends Activity {
  @Override public void onCreate(Bundle b){super.onCreate(b);
  widgetLaunch=WIDGET_START.equals(getIntent()==null?null:getIntent().getAction());
  ScrollView sc=new ScrollView(this);LinearLayout l=new LinearLayout(this);l.setOrientation(LinearLayout.VERTICAL);int p=(int)(24*getResources().getDisplayMetrics().density);l.setPadding(p,p,p,p);sc.addView(l);setContentView(sc);
- TextView title=new TextView(this);title.setText("SpeedVoice v0.9");title.setTextSize(32);l.addView(title);
+ TextView title=new TextView(this);title.setText("SpeedVoice v0.9.1");title.setTextSize(32);l.addView(title);
  TextView intro=new TextView(this);intro.setText("Experimental • Ireland / km/h\nReads visible Google Maps labels or attempts local recognition of red circular signs. If recognition fails, alerts stop. GPS and map data may be wrong. Use road signs and your vehicle speedometer. Set up parked. No screenshots saved or transmitted.");l.addView(intro);
  status=new TextView(this);status.setTextSize(20);status.setPadding(0,p,0,p);l.addView(status);
  add(l,"Demo mode — test indoors",v->{stopService(new Intent(this,GpsService.class));startActivity(new Intent(this,DemoActivity.class));});
@@ -43,7 +43,7 @@ public class MainActivity extends Activity {
  add(l,"Withdraw acknowledgement / stop monitoring",v->{Consent.revoke(this);getSharedPreferences("prefs",MODE_PRIVATE).edit().remove("car_address").apply();getSystemService(android.app.NotificationManager.class).cancel(81);stopService(new Intent(this,GpsService.class));State.running=false;State.limit=-1;State.clearGps();Toast.makeText(this,"Monitoring stopped. Disable accessibility access in Android Settings if no longer needed.",Toast.LENGTH_LONG).show();});
  add(l,"Test voice (no Maps/GPS needed)",v->testVoiceNow());
  add(l,"Test beep (media volume)",v->testBeep());
- TextView audioHelp=new TextView(this);audioHelp.setText("Home screen widget: long-press the home screen, tap Widgets, find SpeedVoice, and add it. After initial permissions are set, tap Start to launch monitoring and Google Maps. Stop works directly from the widget.\\n\\nVoice and alerts use the navigation/media volume channel. Test with media volume raised while safely parked. If the test speaks but live monitoring stays silent, check Reader and Voice diagnostic lines above.");l.addView(audioHelp);
+ TextView audioHelp=new TextView(this);audioHelp.setText("Home screen widget: long-press the home screen, tap Widgets, find SpeedVoice, and add it. After initial permissions are set, tap Start to launch monitoring and Google Maps. Stop works directly from the widget.\\n\\nVoice and alerts use the navigation/media volume channel. A short beep precedes normal speech, and Google Maps voice gets priority. Test with media volume raised while safely parked. If the test speaks but live monitoring stays silent, check Reader and Voice diagnostic lines above.");l.addView(audioHelp);
  TextView t=new TextView(this);t.setText("Warning threshold (not permission to exceed the limit)");l.addView(t);
  RadioGroup g=new RadioGroup(this);for(int n:new int[]{0,3,5}){RadioButton r=new RadioButton(this);r.setId(100+n);r.setText("+"+n+" km/h");g.addView(r);}
  g.check(100+getSharedPreferences("prefs",MODE_PRIVATE).getInt("tolerance",0));g.setOnCheckedChangeListener((group,id)->getSharedPreferences("prefs",MODE_PRIVATE).edit().putInt("tolerance",id-100).apply());l.addView(g);
