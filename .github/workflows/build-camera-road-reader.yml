@@ -1,0 +1,31 @@
+name: Build Camera Road Reader APK
+on:
+  push:
+    branches: [camera-road-reader-v0.1]
+    paths:
+      - 'camera-road-reader/**'
+      - '.github/workflows/build-camera-road-reader.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Build
+        working-directory: camera-road-reader
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CameraRoadReader-v0.1-debug-apk
+          path: camera-road-reader/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
