@@ -4,6 +4,7 @@ import android.Manifest;
 import android.content.pm.PackageManager;
 import android.graphics.*;
 import android.media.*;
+import android.util.Size;
 import android.os.*;
 import android.speech.tts.TextToSpeech;
 import android.view.*;
@@ -25,13 +26,16 @@ import java.util.concurrent.*;
 
 public class MainActivity extends AppCompatActivity {
   private PreviewView preview;
-  private TextView number, status;
+  private TextView number, status, readingHeading;
+  private SignOverlay marker;
   private TextRecognizer ocr;
   private TextToSpeech tts;
   private ExecutorService executor;
   private boolean voice=true, speechReady=false;
-  private int candidate=-1, confirmations=0, announced=-1;
-  private long candidateAt=0,lastFrameAt=0;
+  private int candidate=-1, confirmations=0, announced=-1, confirmed=-1;
+  private long candidateAt=0,lastFrameAt=0,confirmedAt=0,announcedAt=0;
+  private static final long FRAME_INTERVAL_MS=220;
+  private static final long STALE_AFTER_MS=45000;
   private static final Set<Integer> LIMITS = new HashSet<>(Arrays.asList(20,30,40,50,60,80,100,120));
   private int dp(int n){return (int)(n*getResources().getDisplayMetrics().density+.5f);}
   private TextView label(String s,int size,int color) {
@@ -47,9 +51,15 @@ public class MainActivity extends AppCompatActivity {
     layout.setPadding(dp(10),dp(30),dp(10),dp(10));
     layout.addView(label("CAMERA ROAD READER",22,0xff75edb9));
     layout.addView(label("Experimental speed sign recognition",12,0xffffffff));
+    FrameLayout cameraPanel=new FrameLayout(this);
     preview=new PreviewView(this);
-    layout.addView(preview,new LinearLayout.LayoutParams(-1,0,1));
-    number=label("— km/h",42,0xffffffff);layout.addView(number);
+    preview.setScaleType(PreviewView.ScaleType.FILL_CENTER);
+    cameraPanel.addView(preview,new FrameLayout.LayoutParams(-1,-1));
+    marker=new SignOverlay();
+    cameraPanel.addView(marker,new FrameLayout.LayoutParams(-1,-1));
+    layout.addView(cameraPanel,new LinearLayout.LayoutParams(-1,0,1));
+    readingHeading=label("WAITING FOR FIRST SIGN",12,0xfff6cb6f);layout.addView(readingHeading);
+    number=label("— km/h",46,0xffffffff);layout.addView(number);
     status=label("Starting camera…",14,0xff75edb9);layout.addView(status);
     LinearLayout row=new LinearLayout(this);
     Button toggle=new Button(this);toggle.setText("Voice ON");
@@ -79,18 +89,19 @@ public class MainActivity extends AppCompatActivity {
         ProcessCameraProvider provider=future.get();
         Preview p=new Preview.Builder().build();p.setSurfaceProvider(preview.getSurfaceProvider());
         ImageAnalysis a=new ImageAnalysis.Builder()
+          .setTargetResolution(new Size(960,540))
           .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
           .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST).build();
         a.setAnalyzer(executor,this::analyze);
         provider.unbindAll();
         provider.bindToLifecycle(this,CameraSelector.DEFAULT_BACK_CAMERA,p,a);
-        status.setText("Scanning for red-ring signs");
+        updateStatus(SystemClock.elapsedRealtime());
       }catch(Exception err){status.setText("Camera unavailable: "+err.getClass().getSimpleName());}
     },ContextCompat.getMainExecutor(this));
   }
   private void analyze(@NonNull ImageProxy frame){
     long now=SystemClock.elapsedRealtime();
-    if(now-lastFrameAt<800){frame.close();return;} lastFrameAt=now;
+    if(now-lastFrameAt<FRAME_INTERVAL_MS){frame.close();return;} lastFrameAt=now;
     Bitmap bm=null;
     try {
       int w=frame.getWidth(),h=frame.getHeight();
@@ -112,21 +123,113 @@ public class MainActivity extends AppCompatActivity {
   }
   private void recognise(Text result,Bitmap image){
     Integer found=null;
-    for(Text.TextBlock b:result.getTextBlocks())for(Text.Line l:b.getLines())for(Text.Element e:l.getElements()){
-      String s=e.getText().trim();
-      if(!s.matches("[0-9]{2,3}"))continue;
-      int n=Integer.parseInt(s);
-      if(!LIMITS.contains(n))continue;
-      Rect r=e.getBoundingBox();
-      if(r!=null&&r.height()>10&&redRing(image,r)){found=n;break;}
+    Rect bestRect=null;
+    int biggest=0;
+    for(Text.TextBlock block:result.getTextBlocks()){
+      for(Text.Line line:block.getLines()){
+        for(Text.Element element:line.getElements()){
+          String text=element.getText().trim();
+          if(!text.matches("[0-9]{2,3}"))continue;
+          int value=Integer.parseInt(text);
+          if(!LIMITS.contains(value))continue;
+          Rect box=element.getBoundingBox();
+          if(box==null || box.height()<8 || !redRing(image,box))continue;
+          int area=box.width()*box.height();
+          if(area>biggest){biggest=area;found=value;bestRect=box;}
+        }
+      }
     }
-    if(found==null){candidate=-1;confirmations=0;return;}
     long now=SystemClock.elapsedRealtime();
-    if(found!=candidate||now-candidateAt>4500){candidate=found;candidateAt=now;confirmations=1;return;}
-    if(++confirmations<2)return;
-    number.setText(found+" km/h");
-    status.setText("Possible sign — independently verify");
-    if(announced!=found){announced=found;speak("Possible speed limit "+found+" kilometres per hour");}
+    if(found==null){
+      if(candidateAt>0 && now-candidateAt>2500){candidate=-1;confirmations=0;}
+      updateStatus(now);
+      return;
+    }
+    marker.mark(bestRect,image.getWidth(),image.getHeight(),found);
+    // Show the possible new sign immediately, without replacing the last verified reading.
+    if(found!=candidate || now-candidateAt>2500){
+      candidate=found;
+      candidateAt=now;
+      confirmations=1;
+      updateStatus(now);
+      return;
+    }
+    confirmations++;
+    candidateAt=now;
+    if(confirmations>=2){
+      confirmed=found;
+      confirmedAt=now;
+      number.setText(found+" km/h");
+      if(announced!=found || now-announcedAt>90000){
+        announced=found;
+        announcedAt=now;
+        speak("Possible speed limit "+found+" kilometres per hour");
+      }
+      candidate=-1;
+      confirmations=0;
+      candidateAt=0;
+    }
+    updateStatus(now);
+  }
+  private void updateStatus(long now){
+    if(confirmed<0){
+      readingHeading.setText("WAITING FOR FIRST SIGN");
+      number.setTextColor(0xffffffff);
+    }else if(now-confirmedAt>STALE_AFTER_MS){
+      readingHeading.setText("PREVIOUS POSSIBLE SIGN — STALE");
+      number.setTextColor(0xffaeb7c7);
+    }else{
+      readingHeading.setText("LAST POSSIBLE SPEED LIMIT");
+      number.setTextColor(0xffffffff);
+    }
+    if(candidate>=0 && candidateAt>0 && now-candidateAt<2500){
+      status.setText("Checking possible "+candidate+" km/h • still scanning");
+    }else if(confirmed<0){
+      status.setText("Scanning for speed-limit signs…");
+    }else if(now-confirmedAt>STALE_AFTER_MS){
+      status.setText("Old reading ("+(now-confirmedAt)/1000+"s ago) — not a current limit");
+    }else{
+      status.setText("Scanning • last possible sign "+(now-confirmedAt)/1000+"s ago");
+    }
+  }
+  private class SignOverlay extends View{
+    private final Paint outline=new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint textPaint=new Paint(Paint.ANTI_ALIAS_FLAG);
+    private Rect detectedBox;
+    private int imgW,imgH,detectedLimit;
+    private long markedAt=0;
+    SignOverlay(){
+      super(MainActivity.this);
+      setClickable(false);
+      outline.setColor(0xff75edb9);
+      outline.setStyle(Paint.Style.STROKE);
+      outline.setStrokeWidth(dp(3));
+      textPaint.setColor(0xff75edb9);
+      textPaint.setTypeface(Typeface.DEFAULT_BOLD);
+      textPaint.setTextSize(dp(17));
+      textPaint.setShadowLayer(dp(2),0,0,0xff000000);
+    }
+    void mark(Rect box,int width,int height,int speed){
+      int pad=Math.max(10,box.height());
+      detectedBox=new Rect(box.left-pad,box.top-pad,box.right+pad,box.bottom+pad);
+      imgW=width;imgH=height;detectedLimit=speed;
+      markedAt=SystemClock.elapsedRealtime();
+      invalidate();
+      postInvalidateDelayed(1400);
+    }
+    @Override protected void onDraw(Canvas c){
+      super.onDraw(c);
+      if(detectedBox==null || imgW==0 || imgH==0 ||
+          SystemClock.elapsedRealtime()-markedAt>1300)return;
+      float factor=Math.max(getWidth()/(float)imgW,getHeight()/(float)imgH);
+      float dx=(getWidth()-imgW*factor)/2f;
+      float dy=(getHeight()-imgH*factor)/2f;
+      RectF area=new RectF(detectedBox.left*factor+dx,detectedBox.top*factor+dy,
+          detectedBox.right*factor+dx,detectedBox.bottom*factor+dy);
+      c.drawRoundRect(area,dp(7),dp(7),outline);
+      c.drawText("CHECKING "+detectedLimit,Math.max(dp(4),area.left),
+          Math.max(dp(22),area.top-dp(7)),textPaint);
+    }
   }
   private boolean redRing(Bitmap image,Rect rect){
     double cx=rect.exactCenterX(),cy=rect.exactCenterY(),h=rect.height();
