@@ -334,7 +334,9 @@ public class MainActivity extends AppCompatActivity {
       if(roadSignHits>=2){
         latestRoadSign=sign;
         roadSignAt=now;
-        if(!sign.equals(lastSpokenRoadSign)||now-lastSpokenRoadSignAt>90000){
+        // Never give a positive "go" instruction from uncertain camera recognition.
+        if(!"ROADWORKS GO".equals(sign) &&
+            (!sign.equals(lastSpokenRoadSign)||now-lastSpokenRoadSignAt>90000)){
           lastSpokenRoadSign=sign;
           lastSpokenRoadSignAt=now;
           speak("Possible "+sign.toLowerCase(Locale.UK).replace("yield","give way")+" sign");
