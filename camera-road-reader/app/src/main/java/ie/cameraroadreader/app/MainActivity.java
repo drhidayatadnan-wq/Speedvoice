@@ -235,6 +235,7 @@ public class MainActivity extends AppCompatActivity {
     if((text.contains("YIELD") || text.contains("GEILL SLI")
         || text.contains("GEILL")) && redNear(image,rect))return "YIELD";
     if(text.contains("NO ENTRY"))return "NO ENTRY";
+    if(text.contains("END OF DETOUR") || text.contains("DEIREADH AN TIMPILL"))return "END OF DETOUR";
     if(text.contains("NO RIGHT TURN"))return "NO RIGHT TURN";
     if(text.contains("NO LEFT TURN"))return "NO LEFT TURN";
     if(text.contains("NO U TURN"))return "NO U TURN";
@@ -247,7 +248,6 @@ public class MainActivity extends AppCompatActivity {
     if(text.contains("KEEP RIGHT"))return "KEEP RIGHT";
     if(text.contains("ROADWORKS") || text.contains("ROAD WORKS"))return "ROADWORKS";
     if(text.contains("ROAD MARKINGS"))return "ROAD MARKINGS";
-    if(text.contains("END OF DETOUR") || text.contains("DEIREADH AN TIMPILL"))return "END OF DETOUR";
     if(text.contains("TEMPORARY TRAFFIC") || text.contains("TEMPORARY SIGNALS"))return "TEMPORARY TRAFFIC SIGNALS";
     if(text.contains("LANE CLOSED") || text.contains("LANE CLOSURE"))return "LANE CLOSED";
     if(text.contains("NEW ROAD LAYOUT"))return "NEW ROAD LAYOUT";
