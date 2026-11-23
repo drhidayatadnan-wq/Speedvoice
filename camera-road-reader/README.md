@@ -1,7 +1,23 @@
-# Camera Road Reader v0.3
+# Camera Road Reader v0.4
 
-Experimental Android rear-camera prototype, offline and on-device. Uses ML Kit OCR for possible speed limits, STOP, YIELD / Géill Slí, and text signs including NO ENTRY, BUS LANE, CYCLE LANE, ONE WAY, KEEP LEFT, KEEP RIGHT, SCHOOL, ROADWORKS, PEDESTRIAN CROSSING, and NO OVERTAKING. Also includes a conservative *heuristic* visual check for NO ENTRY (red disc with white bar). Two consecutive detections are required to confirm an alert. It keeps the last possible speed-limit number visible while scanning, warns when stale, and offers beep/voice announcements.
+Source for the sign names and families: official RSA *Rules of the Road*, particularly Section 6 on traffic signs and road markings: https://www.rsa.ie/services/learner-drivers/resources/rules-of-the-road
 
-**Lane overlay:** Optional, lightweight estimates of nearby white/yellow road markings. Dashed cyan lines are only *possible markings* and are not validated lane boundaries or navigation/steering guidance. No directional steering or lane selection advice is provided.
+This experimental Android app uses ML Kit OCR and basic camera heuristics. The **RSA IRISH SIGN LIST** screen distinguishes signs with basic OCR detection from those it **cannot** recognise. It is not a trained traffic sign classification model.
 
-**Limitations:** Not a trained traffic sign detector. Many symbol-only signs are unsupported. Could miss, misread, or falsely flag signs and lane paint. Do not treat readings as authoritative, do not look at or operate the phone while driving, and always obey physical signs, lights, and road markings. Test while parked. No cloud or camera upload.
+### Available tentative alerts
+- Numeric red-ring speed limits: OCR + red-colour verification; last value remains visible, becomes stale after 45 seconds.
+- STOP: OCR and red-colour check.
+- YIELD or GÉILL SLÍ: OCR and nearby red-colour check.
+- No entry to vehicles: basic red-disc-and-white-bar pattern.
+- Some bilingual/textual signs including bus lane, cycle lane, one way, keep left/right, school, roadworks and road markings if text is readable.
+- **Yellow diamond**: colour/geometry classification only, cannot distinguish school/roundabout/bend etc.
+- **Orange diamond**: colour/geometry classification only, cannot distinguish the roadworks symbol.
+- Painted lane markings: experimental cyan overlay, not navigation or lane selection.
+
+### Important limitations
+- Most Irish **symbol-only signs**, e.g. roundabout, school symbol, pedestrian crossing, regulatory blue arrows, and motorway lane control red X/green arrow, are **reference only** and not recognised.
+- Ireland's special alternative black-stripe 60 km/h sign is also **not recognised**.
+- Yellow/orange diamond detections are visual-category guesses, with no audio announcement.
+- Signs may be misread or missed and lane overlay may be wrong. Never rely on the app to decide road legality, driving speed, lane selection or safe manoeuvres. Test while stationary. Do not view or operate the phone while driving.
+
+Development project remains on the public `camera-road-reader-v0.1` branch of the Speedvoice repository, without modifying SpeedVoice main.
