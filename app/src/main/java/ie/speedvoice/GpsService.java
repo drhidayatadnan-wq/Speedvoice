@@ -58,7 +58,7 @@ public class GpsService extends Service implements LocationListener {
   float speed=State.freshSpeed();int limit=State.limit;
   String key=title(speed,limit)+details(speed,limit)+State.muted;
   if(!force&&key.equals(lastDisplay))return;
-  try{nm.notify(NOTIFICATION_ID,notification(speed,limit));lastDisplay=key;}catch(RuntimeException ignored){}
+  try{nm.notify(NOTIFICATION_ID,notification(speed,limit));lastDisplay=key;SpeedWidget.refresh(this);}catch(RuntimeException ignored){}
  }
  @Override public int onStartCommand(Intent i,int flags,int id){
   String cmd=i==null?null:i.getAction();
@@ -76,10 +76,10 @@ public class GpsService extends Service implements LocationListener {
   try{
    startForeground(NOTIFICATION_ID,notification(Float.NaN,-1),ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
    lm=getSystemService(LocationManager.class);lm.removeUpdates(this);
-   State.running=true;State.status="Waiting for Google Maps and GPS";
+   State.running=true;State.status="Waiting for Google Maps and GPS";SpeedWidget.refresh(this);
    lm.requestLocationUpdates(LocationManager.GPS_PROVIDER,1000,0,this,Looper.getMainLooper());
    h.removeCallbacks(refresh);h.post(refresh);
-  }catch(Exception e){State.status="GPS unavailable: check permission and location";stopSelf();}
+  }catch(Exception e){State.status="GPS unavailable: check permission and location";SpeedWidget.refresh(this);stopSelf();}
   return START_NOT_STICKY;
  }
  @Override public void onLocationChanged(Location l){
@@ -91,7 +91,7 @@ public class GpsService extends Service implements LocationListener {
  @Override public void onDestroy(){
   h.removeCallbacks(refresh);
   if(lm!=null)try{lm.removeUpdates(this);}catch(RuntimeException ignored){}
-  State.running=false;State.muted=false;State.limit=-1;State.clearGps();State.status="Stopped";
+  State.running=false;State.muted=false;State.limit=-1;State.clearGps();State.status="Stopped";SpeedWidget.refresh(this);
   stopForeground(STOP_FOREGROUND_REMOVE);super.onDestroy();
  }
 }
