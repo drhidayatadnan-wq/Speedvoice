@@ -29,14 +29,18 @@ jobs:
           if-no-files-found: error
 
       - name: Publish experimental debug APK as prerelease
-        if: ${{ github.ref == 'refs/heads/v0.8.2-speech-diagnostics' || github.ref == 'refs/heads/v0.9-widget-voice' }}
+        if: ${{ github.ref == 'refs/heads/v0.8.2-speech-diagnostics' || github.ref == 'refs/heads/v0.9-widget-voice' || github.ref == 'refs/heads/v0.9.1-beep-navigation-priority' }}
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "${GITHUB_REF}" == "refs/heads/v0.9-widget-voice" ]]; then
+          if [[ "${GITHUB_REF}" == "refs/heads/v0.9.1-beep-navigation-priority" ]]; then
+            TAG="v0.9.1-beep-navigation-priority"
+            APK="SpeedVoice-v0.9.1-debug.apk"
+            TITLE="SpeedVoice v0.9.1 — beep and Maps voice priority (experimental)"
+          elif [[ "${GITHUB_REF}" == "refs/heads/v0.9-widget-voice" ]]; then
             TAG="v0.9-widget-voice"
             APK="SpeedVoice-v0.9-debug.apk"
             TITLE="SpeedVoice v0.9 — widget and voice diagnostics (experimental)"
